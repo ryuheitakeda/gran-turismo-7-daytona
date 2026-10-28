@@ -5,102 +5,215 @@
 # This work © 2025 by Jason Lonsberry is licensed under CC BY-NC-SA 4.0.
 # To view a copy of this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
 
+# Usage: gt7-daytona.sh [start|stop|status|log [lines]]
+#   no argument  run in the foreground, quit with CTRL+C
+#   start        run in the background, writing to $LOG_FILE
+
 set -e
-trap exit_gracefully SIGINT
 
 # To prevent sleep, launch with systemd-inhibit
 
 # ---------- config ----------
+# Every value below can be set in $CONFIG_FILE (bash syntax) or overridden by an
+# environment variable of the same name: environment > config file > default
 
-KEYPRESS_LENGTH=0.08
-LAP_MILES=2.6
-LAPS=10
-QUICKPRESS_LENGTH=0.01
-RACE_PRIZE=9705000 # 1st place with clean race bonus
-RACE_TIME=800 # seconds from race start to crossing the finish line
-STRAIGHT_TIME=15 # seconds to drive straight after the start to avoid hitting cars ahead
-WINDOW_NAME='Chiaki | Stream'
+CONFIG_FILE=${CONFIG_FILE:-$HOME/.config/gt7-daytona.conf}
+if [ -f "$CONFIG_FILE" ]; then
+  env_vars=$(export -p)
+  . "$CONFIG_FILE"
+  eval "$env_vars" || true # values from the environment win over the config file
+fi
+
+KEYPRESS_LENGTH=${KEYPRESS_LENGTH:-0.08}
+LAP_MILES=${LAP_MILES:-2.6}
+LAPS=${LAPS:-10}
+LOCK_FILE=${LOCK_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.lock}
+LOG_FILE=${LOG_FILE:-$HOME/gt7-daytona.log}
+MAINTENANCE_RACES=${MAINTENANCE_RACES:-20} # remind to check the engine every N races, 0 to turn off
+QUICKPRESS_LENGTH=${QUICKPRESS_LENGTH:-0.02} # ~40ms taps, the same as when the window was searched on every press
+RACE_PRIZE=${RACE_PRIZE:-9705000} # 1st place with clean race bonus
+RACE_TIME=${RACE_TIME:-800} # seconds from "Race start" to crossing the finish line
+STRAIGHT_TIME=${STRAIGHT_TIME:-15} # seconds to drive straight after the start to avoid hitting cars ahead
+WINDOW_NAME=${WINDOW_NAME:-'^Chiaki \| Stream$'} # xdotool regex, case-insensitive
 
 # ---------- key config ----------
 # Key config MUST be set to match your Chiaki key config
 
-ANALOG_L__R='bracketright' # default ']' Left analog pressing right
-DPAD_R='Right'             # default 'Right'
-KEY_R2='4'                 # default '4'
-KEY_X='Return'             # default 'Return'
-
-# ---------- dependencies ----------
-
-if ! dpkg -s wmctrl >/dev/null 2>&1; then
-  sudo apt install wmctrl
-fi
-if ! dpkg -s xdotool >/dev/null 2>&1; then
-  sudo apt install xdotool
-fi
+ANALOG_L__R=${ANALOG_L__R:-bracketright} # default ']' Left analog pressing right
+DPAD_R=${DPAD_R:-Right}                  # default 'Right'
+KEY_R2=${KEY_R2:-4}                      # default '4'
+KEY_X=${KEY_X:-Return}                   # default 'Return'
 
 # ---------- functions ----------
 
-add() {
-  echo "scale=1; $1 + $2" | bc
+log() {
+  echo "$(date +%T) $*"
 }
 
-multiply() {
-  echo "$1 * $2" | bc
+pause() { # sleep that a signal can interrupt at once
+  sleep "$1" 9>&- & # don't pass on the lock
+  wait $!
+}
+
+running_pid() { # print the pid of the running script, if any
+  [ -f "$LOCK_FILE" ] || return 1
+  if flock -n "$LOCK_FILE" true; then
+    return 1
+  fi
+  cat "$LOCK_FILE"
+}
+
+send() { # send <keydown|keyup> <key>
+  if ! xdotool "$1" --window "$WINDOW_ID" "$2" 2>/dev/null; then
+    log 'ERROR: the Chiaki stream window is gone (stream disconnected?)'
+    exit 1
+  fi
 }
 
 hold() {
-  xdotool search --name "$WINDOW_NAME" keydown "$1"
+  send keydown "$1"
 }
 
 release() {
-  xdotool search --name "$WINDOW_NAME" keyup "$1"
+  send keyup "$1"
 }
 
 press() {
-  xdotool search --name "$WINDOW_NAME" keydown "$1"
+  send keydown "$1"
   sleep $KEYPRESS_LENGTH
-  xdotool search --name "$WINDOW_NAME" keyup "$1"
+  send keyup "$1"
 }
 
 quick_press() {
-  xdotool search --name "$WINDOW_NAME" keydown "$1"
+  send keydown "$1"
   sleep $QUICKPRESS_LENGTH
-  xdotool search --name "$WINDOW_NAME" keyup "$1"
+  send keyup "$1"
+}
+
+release_all() {
+  for key in "$ANALOG_L__R" "$DPAD_R" "$KEY_R2" "$KEY_X"; do
+    xdotool keyup --window "$WINDOW_ID" "$key" 2>/dev/null || true
+  done
 }
 
 exit_gracefully() {
-  printf '\nQuitting \n'
-  release $ANALOG_L__R
-  release $DPAD_R
-  release $KEY_R2
-  release $KEY_X
-  exit
+  release_all
+  kill $(jobs -p) 2>/dev/null || true
+  log 'Quitting'
 }
+
+# ---------- commands ----------
+
+case "$1" in
+  '') ;;
+  start)
+    if pid=$(running_pid); then
+      echo "Already running (pid $pid)"
+      exit 1
+    fi
+    setsid -f "$0" >> "$LOG_FILE" 2>&1 < /dev/null
+    sleep 2
+    tail -n 5 "$LOG_FILE"
+    exit
+    ;;
+  stop)
+    if ! pid=$(running_pid); then
+      echo 'Not running'
+      exit
+    fi
+    kill -INT "$pid"
+    for i in $(seq 50); do
+      if ! running_pid >/dev/null; then
+        echo 'Stopped'
+        exit
+      fi
+      sleep 0.1
+    done
+    echo "Still running (pid $pid)"
+    exit 1
+    ;;
+  status)
+    if pid=$(running_pid); then
+      echo "Running (pid $pid)"
+    else
+      echo 'Not running'
+    fi
+    tail -n 5 "$LOG_FILE" 2>/dev/null || true
+    exit
+    ;;
+  log)
+    tail -n "${2:-30}" "$LOG_FILE"
+    exit
+    ;;
+  *)
+    echo "Usage: $0 [start|stop|status|log [lines]]" >&2
+    exit 2
+    ;;
+esac
+
+# ---------- dependencies ----------
+
+missing=''
+for cmd in xdotool flock awk; do
+  if ! command -v $cmd >/dev/null 2>&1; then
+    missing="$missing $cmd"
+  fi
+done
+if [ -n "$missing" ]; then
+  echo "Missing commands:$missing. Install them first (e.g. sudo apt install xdotool)" >&2
+  exit 1
+fi
+
+export DISPLAY
+if [ -z "$DISPLAY" ]; then
+  echo 'DISPLAY is not set. Run inside the desktop session or set DISPLAY (e.g. DISPLAY=:20)' >&2
+  exit 1
+fi
+if ! xdotool getdisplaygeometry >/dev/null 2>&1; then
+  echo "Cannot open display $DISPLAY. Quitting" >&2
+  exit 1
+fi
 
 # ---------- main  ----------
 
-RACE_MILES=$(multiply $LAP_MILES $LAPS)
+mkdir -p "$(dirname "$LOCK_FILE")"
+exec 9<>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "gt7-daytona.sh is already running (pid $(cat "$LOCK_FILE")). Quitting" >&2
+  exit 1
+fi
+echo $$ > "$LOCK_FILE"
+
+WINDOW_ID=$(xdotool search --name "$WINDOW_NAME" 2>/dev/null | head -n 1)
+if [ -z "$WINDOW_ID" ]; then
+  echo "The Chiaki stream window was not found on $DISPLAY. Quitting" >&2
+  exit 1
+fi
+
+trap exit_gracefully EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+log "Started: RACE_TIME=$RACE_TIME STRAIGHT_TIME=$STRAIGHT_TIME RACE_PRIZE=$RACE_PRIZE display=$DISPLAY window=$WINDOW_ID"
+
+RACE_MILES=$(awk -v m="$LAP_MILES" -v n="$LAPS" 'BEGIN { printf "%.1f", m * n }')
 
 current_miles=0.0
 current_money=0
 race_count=0
 
-if ! wmctrl -l|grep "$WINDOW_NAME" >/dev/null 2>&1; then
-  echo 'The Chiaki stream window was not found. Quitting'
-  exit
-fi
-
 while true
 do
   race_count=$(($race_count + 1))
 
-  echo "Race $race_count"
+  log "Race $race_count"
   press $KEY_X
-  sleep 2 # let GT7 register X before R2 goes down, or the race may not start
+  pause 2 # let GT7 register X before R2 goes down, or the race may not start
   hold $KEY_R2 # hold only after starting; GT7 menus ignore X while R2 is held
-  sleep 6
+  pause 6
 
-  echo '  Race start'
+  log "  Race start (Race ending at $(date -d "+$RACE_TIME seconds" +%T))"
   # time by wall clock: each xdotool call adds overhead, so counting ticks drifts
   steer_start=$((SECONDS + STRAIGHT_TIME))
   race_end=$((SECONDS + RACE_TIME))
@@ -108,44 +221,48 @@ do
     if [ $SECONDS -ge $steer_start ]; then
       quick_press $ANALOG_L__R
     fi
-    sleep 0.5
+    pause 0.5
   done
 
-  echo '  Race ending'
-  sleep 30
+  log '  Race ending'
+  pause 30
   release $KEY_R2
 
-  echo 'Standings'
-  sleep 20 # extra wait here to buffer for slow finishes
+  log 'Standings'
+  pause 20 # extra wait here to buffer for slow finishes
   press $KEY_X
 
-  echo 'Rewards'
+  log 'Rewards'
   press $KEY_X
-  sleep 3
+  pause 3
 
-  current_miles=$(add $current_miles $RACE_MILES)
+  current_miles=$(awk -v a="$current_miles" -v b="$RACE_MILES" 'BEGIN { printf "%.1f", a + b }')
   current_money=$((current_money + RACE_PRIZE))
 
-  printf "  Credits: %'d\n" $current_money
+  log "$(printf "  Credits: %'d" $current_money)"
   press $KEY_X
-  sleep 2
+  pause 2
 
-  echo "  Miles: $current_miles"
+  log "  Miles: $current_miles"
   press $KEY_X
-  sleep 4
+  pause 4
 
-  echo 'Replay'
+  log 'Replay'
   press $KEY_X
-  sleep 4
+  pause 4
   press $KEY_X
-  sleep 2
+  pause 2
   press $KEY_X
   press $KEY_X
-  sleep 5
+  pause 5
 
-  echo 'Retry'
+  log 'Retry'
   press $DPAD_R
-  sleep 1
+  pause 1
   press $KEY_X
-  sleep 4
+  pause 4
+
+  if [ "$MAINTENANCE_RACES" -gt 0 ] && [ $((race_count % MAINTENANCE_RACES)) -eq 0 ]; then
+    log "  $race_count races done: check the oil and engine condition"
+  fi
 done
