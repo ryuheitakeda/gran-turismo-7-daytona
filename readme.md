@@ -84,7 +84,9 @@ This script is the digital equivalent of using a rubber-band on your controller.
   RACE_TIME=805
   ```
 
-- `RACE_TIME` (default 800): seconds from the "Race start" log line until you cross the finish line.  It was measured with the grid start above; you will need to set it according to your vehicle speed.
+- `PLAYSTATION_IP` (default empty): your Playstation's IP address.  When set, the script reads GT7's telemetry (see below) to check that the race started, to end the race at the finish line, and to quit when the car gets stuck.
+- `START_TIMEOUT` (default 15), `STUCK_SPEED` (default 30) and `STUCK_TIME` (default 5): with telemetry, quit when the car isn't on track that many seconds after pressing X, or stays below `STUCK_SPEED` km/h for `STUCK_TIME` seconds during the race.
+- `RACE_TIME` (default 800): seconds from the "Race start" log line until you cross the finish line.  It was measured with the grid start above; you will need to set it according to your vehicle speed.  With telemetry it is only used when the telemetry stops coming.
   - If you're not sure, start with the time it takes to rubber-band the race.
 - `STRAIGHT_TIME` (default 15): seconds to drive straight after the start before steering towards the wall.
 - `RACE_PRIZE` (default 9705000): only used to total the credits in the log.  If you use a different car or setup, set it to the reward you get.
@@ -109,6 +111,13 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - The script releases every key it holds when it quits, whether by `CTRL+C`, `stop`, `kill` or an error.  Only `kill -9` can leave R2 held down in Chiaki; release it with `xdotool search --name '^Chiaki \| Stream$' keyup 4`.
 - If the Chiaki stream window disappears (e.g. the stream disconnects), the script logs an error and quits.
 
+## Telemetry
+
+- GT7 sends live telemetry (lap, speed, position, whether the car is on track) to a computer that sends it heartbeats over UDP.  `gt7-telemetry.py` receives it with nothing but python3; GT7 needs no setting for it.
+- Let the telemetry through the computer's firewall, e.g. `sudo ufw allow from <playstation-ip> to any port 33740 proto udp`.
+- Set `PLAYSTATION_IP` in the config file.  The log says "Telemetry from ..." at start, and "Race ending (P1, best lap 1:16.856)" when the car crosses the finish line.
+- Without telemetry the script times the race with `RACE_TIME` as before.
+
 ## Running without a monitor (Chrome Remote Desktop)
 
 - Install a light desktop and Chrome Remote Desktop: `sudo apt install --no-install-recommends xfce4 xfce4-terminal dbus-x11` and the `.deb` from <https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb>.
@@ -131,6 +140,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - Fork changes:
   - Hold R2 only from 2 seconds after pressing X and release it before the menus
   - Press X twice before the first race, because the start screen hides its menu when left alone
+  - Read GT7 telemetry (`PLAYSTATION_IP`): check the race started, end the race at the finish line, quit when the car is stuck, log the position and best lap
   - Time the race by the clock, drive straight for `STRAIGHT_TIME` after the start, grid start; `RACE_TIME` and `RACE_PRIZE` re-measured
   - Release all keys on any exit and log an error when the stream window disappears
   - Match the window title exactly
