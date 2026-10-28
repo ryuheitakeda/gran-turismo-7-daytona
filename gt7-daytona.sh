@@ -5,9 +5,10 @@
 # This work © 2025 by Jason Lonsberry is licensed under CC BY-NC-SA 4.0.
 # To view a copy of this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
 
-# Usage: gt7-daytona.sh [start|stop|status|log [lines]]
+# Usage: gt7-daytona.sh [start|stop|stop-after-race|cancel-stop|status|log [lines]]
 #   no argument  run in the foreground, quit with CTRL+C
 #   start        run in the background, writing to $LOG_FILE
+#   stop-after-race  stop at the start screen once the current race is over
 
 set -e
 
@@ -29,6 +30,7 @@ LAP_MILES=${LAP_MILES:-2.6}
 LAPS=${LAPS:-10}
 LOCK_FILE=${LOCK_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.lock}
 LOG_FILE=${LOG_FILE:-$HOME/gt7-daytona.log}
+STOP_FILE=${STOP_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.stop-after-race}
 MAINTENANCE_RACES=${MAINTENANCE_RACES:-20} # remind to check the engine every N races, 0 to turn off
 PLAYSTATION_IP=${PLAYSTATION_IP:-} # set to read GT7 telemetry: detect the start, the finish and a stuck car
 QUICKPRESS_LENGTH=${QUICKPRESS_LENGTH:-0.01}
@@ -157,12 +159,26 @@ case "$1" in
     tail -n 5 "$LOG_FILE" 2>/dev/null || true
     exit
     ;;
+  stop-after-race)
+    if ! pid=$(running_pid); then
+      echo 'Not running'
+      exit 1
+    fi
+    touch "$STOP_FILE"
+    echo 'Will stop at the start screen after this race'
+    exit
+    ;;
+  cancel-stop)
+    rm -f "$STOP_FILE"
+    echo 'Will keep racing'
+    exit
+    ;;
   log)
     tail -n "${2:-30}" "$LOG_FILE"
     exit
     ;;
   *)
-    echo "Usage: $0 [start|stop|status|log [lines]]" >&2
+    echo "Usage: $0 [start|stop|stop-after-race|cancel-stop|status|log [lines]]" >&2
     exit 2
     ;;
 esac
@@ -236,8 +252,15 @@ current_miles=0.0
 current_money=0
 race_count=0
 
+rm -f "$STOP_FILE"
+
 while true
 do
+  if [ -f "$STOP_FILE" ]; then
+    rm -f "$STOP_FILE"
+    log 'Stopped after the race as requested; the game is at the start screen'
+    exit 0
+  fi
   race_count=$(($race_count + 1))
 
   log "Race $race_count"

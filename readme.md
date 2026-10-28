@@ -107,6 +107,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   - `./gt7-daytona.sh` runs it in the terminal.  When you're done, exit the script by pressing `CTRL+C`.
   - `./gt7-daytona.sh start` runs it in the background and writes the log to `~/gt7-daytona.log`.  Use `./gt7-daytona.sh status`, `./gt7-daytona.sh log` and `./gt7-daytona.sh stop` to check on it and stop it.
   - From an SSH session, set `DISPLAY` to the desktop that shows Chiaki (e.g. `DISPLAY=:20` in the config file).
+- `./gt7-daytona.sh stop-after-race` lets the current race finish and stops at the start screen, ready for the next `start`; `./gt7-daytona.sh cancel-stop` takes it back.
 - Only one copy of the script can run at a time.
 - The script releases every key it holds when it quits, whether by `CTRL+C`, `stop`, `kill` or an error.  Only `kill -9` can leave R2 held down in Chiaki; release it with `xdotool search --name '^Chiaki \| Stream$' keyup 4`.
 - If the Chiaki stream window disappears (e.g. the stream disconnects), the script logs an error and quits.
@@ -117,6 +118,13 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - Let the telemetry through the computer's firewall, e.g. `sudo ufw allow from <playstation-ip> to any port 33740 proto udp`.
 - Set `PLAYSTATION_IP` in the config file.  The log says "Telemetry from ..." at start, and "Race ending (P1, best lap 1:16.856)" when the car crosses the finish line.
 - Without telemetry the script times the race with `RACE_TIME` as before.
+
+## Web page
+
+- `./gt7-web.py start` serves a page on the computer's Tailscale address, port 8077 (`WEB_ADDRESS`, `WEB_PORT`); `stop` and `status` work as for the script.
+- It shows the live telemetry, the races, wins and credits since the script started and for today, and the credits per hour.  Credits count races won (P1) at `RACE_PRIZE`, so they are an estimate.
+- Its buttons start the script (put the cursor on Start first), stop it after the current race, or stop it at once.
+- Let only Tailscale through the firewall, e.g. `sudo ufw allow in on tailscale0 to any port 8077 proto tcp`.
 
 ## Running without a monitor (Chrome Remote Desktop)
 
@@ -141,6 +149,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   - Hold R2 only from 2 seconds after pressing X and release it before the menus
   - Press X twice before the first race, because the start screen hides its menu when left alone
   - Read GT7 telemetry (`PLAYSTATION_IP`): check the race started, end the race at the finish line, quit when the car is stuck, log the position and best lap
+  - Web page with live telemetry and credits per hour, with start, stop-after-race and emergency stop buttons; dates in the log
   - Time the race by the clock, drive straight for `STRAIGHT_TIME` after the start, grid start; `RACE_TIME` and `RACE_PRIZE` re-measured
   - Release all keys on any exit and log an error when the stream window disappears
   - Match the window title exactly

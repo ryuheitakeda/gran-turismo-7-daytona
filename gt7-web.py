@@ -23,6 +23,8 @@ LOG_FILE = os.environ.get('LOG_FILE', os.path.join(HOME, 'gt7-daytona.log'))
 CACHE = os.environ.get('XDG_CACHE_HOME', os.path.join(HOME, '.cache'))
 LOCK_FILE = os.environ.get('LOCK_FILE', os.path.join(CACHE, 'gt7-daytona.lock'))
 PID_FILE = os.path.join(CACHE, 'gt7-web.pid')
+STOP_FILE = os.environ.get('STOP_FILE', os.path.join(CACHE, 'gt7-daytona.stop-after-race'))
+SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gt7-daytona.sh')
 WEB_LOG = os.path.join(HOME, 'gt7-web.log')
 WEB_PORT = int(os.environ.get('WEB_PORT', '8077'))
 RUNTIME = os.environ.get('XDG_RUNTIME_DIR', '/run/user/%d' % os.getuid())
@@ -111,7 +113,17 @@ def earnings():
 
 
 def state():
-    return {'telemetry': telemetry(), 'running': script_running(), **earnings()}
+    return {'telemetry': telemetry(), 'running': script_running(),
+            'stop_after_race': os.path.exists(STOP_FILE), **earnings()}
+
+
+ACTIONS = {'start': ['start'], 'stop-after-race': ['stop-after-race'],
+           'cancel-stop': ['cancel-stop'], 'emergency-stop': ['stop']}
+
+
+def run_script(action):
+    result = subprocess.run([SCRIPT] + ACTIONS[action], capture_output=True, text=True, timeout=15)
+    return {'ok': result.returncode == 0, 'output': (result.stdout + result.stderr).strip()}
 
 
 PAGE = '''<!doctype html>
@@ -154,11 +166,24 @@ tr:last-child td { border-bottom: 0; }
 pre { margin: 0; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap;
   word-break: break-all; color: var(--muted); }
 .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.controls button { flex: 1 1 140px; min-height: 48px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--card); color: var(--text); font: inherit; font-weight: 650; cursor: pointer; }
+.controls button:disabled { opacity: .4; cursor: default; }
+.controls .start { border-color: var(--ok); color: var(--ok); }
+.controls .danger { background: var(--accent); border-color: var(--accent); color: #fff; }
+#message { font-size: 13px; color: var(--muted); min-height: 1.5em; margin: -4px 0 12px; }
 </style>
 </head>
 <body>
 <main>
 <header><h1>GT7 Daytona</h1><span id="status" class="badge">読み込み中</span></header>
+<div class="controls">
+  <button id="start" class="start" onclick="act('start')">開始</button>
+  <button id="stop-after-race" onclick="toggleStop()">このレースで停止</button>
+  <button id="emergency" class="danger" onclick="act('emergency-stop')">緊急停止</button>
+</div>
+<div id="message"></div>
 <div class="grid">
   <section class="card">
     <h2>ライブテレメトリー</h2>
@@ -197,6 +222,17 @@ pre { margin: 0; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; 
 </main>
 <script>
 const $ = id => document.getElementById(id);
+let stopPlanned = false;
+async function act(action) {
+  if (action === 'start' && !confirm('GT7 のカーソルが「スタート」にあることを確認しましたか？')) return;
+  $('message').textContent = '実行中…';
+  try {
+    const r = await (await fetch('api/' + action, {method: 'POST', headers: {'X-GT7-Control': '1'}})).json();
+    $('message').textContent = r.output || (r.ok ? '完了' : '失敗');
+  } catch (e) { $('message').textContent = '失敗: ' + e; }
+  update();
+}
+const toggleStop = () => act(stopPlanned ? 'cancel-stop' : 'stop-after-race');
 const fmt = n => Math.round(n).toLocaleString('ja-JP');
 const lapTime = ms => ms > 0 ? `${Math.floor(ms / 60000)}:${((ms % 60000) / 1000).toFixed(3).padStart(6, '0')}` : '–';
 const hours = h => `${Math.floor(h)}時間${String(Math.round((h % 1) * 60)).padStart(2, '0')}分`;
@@ -208,7 +244,13 @@ async function update() {
   let label = s.running ? '動作中' : '停止中', cls = s.running ? 'ok' : 'warn';
   if (t) label += t.paused ? '・ポーズ中' : t.on_track ? (t.lap > t.laps ? '・ゴール後' : '・レース中') : '・メニュー';
   else label += '・テレメトリーなし';
+  if (s.running && s.stop_after_race) label += '・このレースで停止予定';
   $('status').textContent = label; $('status').className = 'badge ' + cls;
+  stopPlanned = s.stop_after_race;
+  $('start').disabled = s.running;
+  $('stop-after-race').disabled = !s.running;
+  $('stop-after-race').textContent = stopPlanned ? '停止予定を取り消す' : 'このレースで停止';
+  $('emergency').disabled = !s.running;
   $('speed').textContent = t ? t.speed : '–';
   $('lap').textContent = t && t.laps ? `${Math.min(t.lap, t.laps)} / ${t.laps}` : '–';
   $('position').textContent = t && t.position > 0 ? `${t.position}位` : '–';
@@ -249,6 +291,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Type', kind)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        # a custom header can't be sent cross-site without a CORS preflight, which
+        # this server never allows, so other web pages can't press these buttons
+        action = self.path.split('?')[0].removeprefix('/api/')
+        if self.headers.get('X-GT7-Control') != '1' or action not in ACTIONS:
+            self.send_error(403)
+            return
+        body = json.dumps(run_script(action)).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
