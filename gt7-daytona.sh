@@ -16,8 +16,9 @@ KEYPRESS_LENGTH=0.08
 LAP_MILES=2.6
 LAPS=10
 QUICKPRESS_LENGTH=0.01
-RACE_PRIZE=85200
-RACE_TIME=671
+RACE_PRIZE=9705000 # 1st place with clean race bonus
+RACE_TIME=800 # seconds from race start to crossing the finish line
+STRAIGHT_TIME=15 # seconds to drive straight after the start to avoid hitting cars ahead
 WINDOW_NAME='Chiaki | Stream'
 
 # ---------- key config ----------
@@ -79,7 +80,6 @@ exit_gracefully() {
 # ---------- main  ----------
 
 RACE_MILES=$(multiply $LAP_MILES $LAPS)
-RACE_TICKS=$(multiply 2 $RACE_TIME)
 
 current_miles=0.0
 current_money=0
@@ -90,24 +90,30 @@ if ! wmctrl -l|grep "$WINDOW_NAME" >/dev/null 2>&1; then
   exit
 fi
 
-hold $KEY_R2
-
 while true
 do
   race_count=$(($race_count + 1))
 
   echo "Race $race_count"
   press $KEY_X
-  sleep 8
+  sleep 2 # let GT7 register X before R2 goes down, or the race may not start
+  hold $KEY_R2 # hold only after starting; GT7 menus ignore X while R2 is held
+  sleep 6
 
   echo '  Race start'
-  for lap in $(seq 1 $RACE_TICKS); do
-    quick_press $ANALOG_L__R
+  # time by wall clock: each xdotool call adds overhead, so counting ticks drifts
+  steer_start=$((SECONDS + STRAIGHT_TIME))
+  race_end=$((SECONDS + RACE_TIME))
+  while [ $SECONDS -lt $race_end ]; do
+    if [ $SECONDS -ge $steer_start ]; then
+      quick_press $ANALOG_L__R
+    fi
     sleep 0.5
   done
 
   echo '  Race ending'
   sleep 30
+  release $KEY_R2
 
   echo 'Standings'
   sleep 20 # extra wait here to buffer for slow finishes
