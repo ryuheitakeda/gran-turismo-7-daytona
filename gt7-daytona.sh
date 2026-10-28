@@ -51,7 +51,7 @@ KEY_X=${KEY_X:-Return}                   # default 'Return'
 # ---------- functions ----------
 
 log() {
-  echo "$(date +%T) $*"
+  echo "$(date '+%F %T') $*"
 }
 
 pause() { # sleep that a signal can interrupt at once
@@ -97,7 +97,7 @@ quick_press() {
 
 telemetry() { # read the latest telemetry into t_*; fails without fresh data
   [ -n "$PLAYSTATION_IP" ] && [ -f "$TELEMETRY_FILE" ] || return 1
-  read -r t_time t_on_track t_paused t_loading t_lap t_laps t_speed t_position t_best t_last < "$TELEMETRY_FILE" || return 1
+  read -r t_time t_on_track t_paused t_loading t_lap t_laps t_speed t_position t_best t_last t_rest < "$TELEMETRY_FILE" || return 1
   [ $((EPOCHSECONDS - t_time)) -le 2 ]
 }
 
@@ -215,7 +215,7 @@ trap 'exit 143' TERM
 log "Started: RACE_TIME=$RACE_TIME STRAIGHT_TIME=$STRAIGHT_TIME RACE_PRIZE=$RACE_PRIZE display=$DISPLAY window=$WINDOW_ID"
 
 if [ -n "$PLAYSTATION_IP" ]; then
-  TELEMETRY_FILE=${XDG_RUNTIME_DIR:-/tmp}/gt7-telemetry.$$
+  TELEMETRY_FILE=${XDG_RUNTIME_DIR:-/tmp}/gt7-telemetry.state # read by gt7-web.py
   "$(dirname "$0")/gt7-telemetry.py" "$PLAYSTATION_IP" "$TELEMETRY_FILE" 9>&- &
   for i in $(seq 10); do
     pause 1

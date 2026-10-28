@@ -5,6 +5,7 @@
 #
 # The state file holds one line, updated ~5 times a second:
 #   epoch on_track paused loading lap laps speed_kmh position best_lap_ms last_lap_ms
+#   gear throttle brake rpm   (throttle and brake 0-255)
 # GT7 only sends to a host that keeps sending it heartbeats, and the packets
 # are Salsa20 encrypted. The host firewall must allow UDP port 33740 in.
 
@@ -56,9 +57,11 @@ def state_line(p):
     best, last = struct.unpack_from('<ii', p, 0x78)
     position = struct.unpack_from('<h', p, 0x84)[0]
     speed = struct.unpack_from('<f', p, 0x4C)[0] * 3.6
-    return '%d %d %d %d %d %d %d %d %d %d\n' % (
+    rpm = struct.unpack_from('<f', p, 0x3C)[0]
+    return '%d %d %d %d %d %d %d %d %d %d %d %d %d %d\n' % (
         time.time(), flags & 1, flags >> 1 & 1, flags >> 2 & 1,
-        lap, laps, speed, position, best, last)
+        lap, laps, speed, position, best, last,
+        p[0x90] & 0x0f, p[0x91], p[0x92], rpm)
 
 
 def main():
