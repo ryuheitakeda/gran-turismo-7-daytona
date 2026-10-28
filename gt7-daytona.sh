@@ -71,11 +71,18 @@ running_pid() { # print the pid of the running script, if any
 }
 
 send() { # send <keydown|keyup> <key>
-  # look the window up on every key: the steering is tuned to the time this takes
-  if ! xdotool search --name "$WINDOW_NAME" "$1" "$2" 2>/dev/null; then
-    log 'ERROR: the Chiaki stream window is gone (stream disconnected?)'
-    exit 1
-  fi
+  # look the window up on every key: the steering is tuned to the time this takes.
+  # The lookup also fails when another window closes while it runs, so try a few
+  # more times before deciding the stream window is gone
+  local try
+  for try in 1 2 3 4 5; do
+    if xdotool search --name "$WINDOW_NAME" "$1" "$2" 2>/dev/null; then
+      return
+    fi
+    sleep 0.2
+  done
+  log 'ERROR: the Chiaki stream window is gone (stream disconnected?)'
+  exit 1
 }
 
 hold() {
