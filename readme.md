@@ -101,6 +101,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - With your low PP tune selected, start a custom race at Daytona and load the custom race settings.
 - Enter the race itself.  Switch to your high PP tune.
 - With the arrow on the Start button, start the script.
+  - The start screen hides its menu after a while without input, and the first X press only brings it back.  So before the first race the script presses X twice, 2 seconds apart; if the menu was showing, the second press lands on the loading screen.
   - `./gt7-daytona.sh` runs it in the terminal.  When you're done, exit the script by pressing `CTRL+C`.
   - `./gt7-daytona.sh start` runs it in the background and writes the log to `~/gt7-daytona.log`.  Use `./gt7-daytona.sh status`, `./gt7-daytona.sh log` and `./gt7-daytona.sh stop` to check on it and stop it.
   - From an SSH session, set `DISPLAY` to the desktop that shows Chiaki (e.g. `DISPLAY=:20` in the config file).
@@ -128,7 +129,8 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - Initial Release
 - Updated for xdotool 3.2 and re-timed for GT7 Update 1.63
 - Fork changes:
-  - Hold R2 only from 2 seconds after pressing X and release it before the menus; GT7 ignores X while R2 is held
+  - Hold R2 only from 2 seconds after pressing X and release it before the menus
+  - Press X twice before the first race, because the start screen hides its menu when left alone
   - Time the race by the clock, drive straight for `STRAIGHT_TIME` after the start, grid start; `RACE_TIME` and `RACE_PRIZE` re-measured
   - Release all keys on any exit and log an error when the stream window disappears
   - Match the window title exactly

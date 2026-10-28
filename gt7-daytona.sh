@@ -209,9 +209,16 @@ do
   race_count=$(($race_count + 1))
 
   log "Race $race_count"
+  if [ $race_count -eq 1 ]; then
+    # the start screen hides its menu after a while without input, and the
+    # first X only brings it back; if the menu was showing, this X starts the
+    # race and the next one lands on the loading screen
+    press $KEY_X
+    pause 2
+  fi
   press $KEY_X
-  pause 2 # let GT7 register X before R2 goes down, or the race may not start
-  hold $KEY_R2 # hold only after starting; GT7 menus ignore X while R2 is held
+  pause 2
+  hold $KEY_R2 # hold only during the race, never in the menus
   pause 6
 
   log "  Race start (Race ending at $(date -d "+$RACE_TIME seconds" +%T))"
