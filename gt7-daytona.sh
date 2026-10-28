@@ -30,7 +30,7 @@ LAPS=${LAPS:-10}
 LOCK_FILE=${LOCK_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.lock}
 LOG_FILE=${LOG_FILE:-$HOME/gt7-daytona.log}
 MAINTENANCE_RACES=${MAINTENANCE_RACES:-20} # remind to check the engine every N races, 0 to turn off
-QUICKPRESS_LENGTH=${QUICKPRESS_LENGTH:-0.02} # ~40ms taps, the same as when the window was searched on every press
+QUICKPRESS_LENGTH=${QUICKPRESS_LENGTH:-0.01}
 RACE_PRIZE=${RACE_PRIZE:-9705000} # 1st place with clean race bonus
 RACE_TIME=${RACE_TIME:-800} # seconds from "Race start" to crossing the finish line
 STRAIGHT_TIME=${STRAIGHT_TIME:-15} # seconds to drive straight after the start to avoid hitting cars ahead
@@ -64,7 +64,8 @@ running_pid() { # print the pid of the running script, if any
 }
 
 send() { # send <keydown|keyup> <key>
-  if ! xdotool "$1" --window "$WINDOW_ID" "$2" 2>/dev/null; then
+  # look the window up on every key: the steering is tuned to the time this takes
+  if ! xdotool search --name "$WINDOW_NAME" "$1" "$2" 2>/dev/null; then
     log 'ERROR: the Chiaki stream window is gone (stream disconnected?)'
     exit 1
   fi
@@ -92,7 +93,7 @@ quick_press() {
 
 release_all() {
   for key in "$ANALOG_L__R" "$DPAD_R" "$KEY_R2" "$KEY_X"; do
-    xdotool keyup --window "$WINDOW_ID" "$key" 2>/dev/null || true
+    xdotool search --name "$WINDOW_NAME" keyup "$key" 2>/dev/null || true
   done
 }
 

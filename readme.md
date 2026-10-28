@@ -89,7 +89,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - `STRAIGHT_TIME` (default 15): seconds to drive straight after the start before steering towards the wall.
 - `RACE_PRIZE` (default 9705000): only used to total the credits in the log.  If you use a different car or setup, set it to the reward you get.
 - `MAINTENANCE_RACES` (default 20): log a reminder to check the oil and engine every that many races; 0 turns it off.
-- `QUICKPRESS_LENGTH` (default 0.02) and `KEYPRESS_LENGTH` (default 0.08): how long the steering taps and the menu presses last, in seconds.
+- `QUICKPRESS_LENGTH` (default 0.01) and `KEYPRESS_LENGTH` (default 0.08): how long the steering taps and the menu presses last, in seconds.  The window is looked up on every key press, which adds about 0.04 seconds to each tap; the steering is tuned with that included.
 - `WINDOW_NAME` (default `^Chiaki \| Stream$`): the Chiaki stream window title as an xdotool regular expression (case-insensitive).
 - `ANALOG_L__R`, `DPAD_R`, `KEY_R2`, `KEY_X`: keys that MUST match your Chiaki key config.  The defaults are Chiaki's default keys.
 - `LOG_FILE` (default `~/gt7-daytona.log`) and `LOCK_FILE` (default `~/.cache/gt7-daytona.lock`): used by the background commands below.
@@ -131,7 +131,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   - Hold R2 only from 2 seconds after pressing X and release it before the menus; GT7 ignores X while R2 is held
   - Time the race by the clock, drive straight for `STRAIGHT_TIME` after the start, grid start; `RACE_TIME` and `RACE_PRIZE` re-measured
   - Release all keys on any exit and log an error when the stream window disappears
-  - Match the window title exactly and look the window up once
+  - Match the window title exactly
   - `start`, `stop`, `status` and `log` commands, a lock against running twice, times in the log, a maintenance reminder
   - Settings from a config file or environment variables
   - Check for missing commands and `DISPLAY` instead of installing packages; `bc` and `wmctrl` are no longer needed
