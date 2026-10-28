@@ -34,6 +34,7 @@ STOP_FILE=${STOP_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.stop-after-ra
 MAINTENANCE_RACES=${MAINTENANCE_RACES:-20} # remind to check the engine every N races, 0 to turn off
 PLAYSTATION_IP=${PLAYSTATION_IP:-} # set to read GT7 telemetry: detect the start, the finish and a stuck car
 QUICKPRESS_LENGTH=${QUICKPRESS_LENGTH:-0.01}
+FINISH_WAIT=${FINISH_WAIT:-8} # with telemetry, seconds from the finish line to the first X
 RACE_PRIZE=${RACE_PRIZE:-9705000} # 1st place with clean race bonus
 RACE_TIME=${RACE_TIME:-800} # seconds from "Race start" to crossing the finish line, used without telemetry
 START_TIMEOUT=${START_TIMEOUT:-15} # with telemetry, quit if the car isn't on track this many seconds after X
@@ -325,11 +326,18 @@ do
   done
 
   log "  Race ending$result"
-  pause 30
-  release $KEY_R2
+  if [ -n "$result" ]; then
+    # telemetry saw the car cross the line, so no buffer for a late finish is needed
+    release $KEY_R2
+    pause $FINISH_WAIT
+    log 'Standings'
+  else
+    pause 30
+    release $KEY_R2
 
-  log 'Standings'
-  pause 20 # extra wait here to buffer for slow finishes
+    log 'Standings'
+    pause 20 # extra wait here to buffer for slow finishes
+  fi
   press $KEY_X
 
   log 'Rewards'
