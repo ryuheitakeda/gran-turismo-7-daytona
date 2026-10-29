@@ -43,6 +43,8 @@ STUCK_SPEED = float(env('STUCK_SPEED', '30'))
 STUCK_TIME = float(env('STUCK_TIME', '5'))
 STUCK_GIVE_UP = float(env('STUCK_GIVE_UP', '60'))  # stuck this long: give up (GT7 puts a stuck car back sooner)
 STUCK_RETRY = float(env('STUCK_RETRY', '20'))  # stuck this long: pause and retry the race (0: never)
+LAUNCH_THROTTLE = float(env('LAUNCH_THROTTLE', '0.5'))  # R2 below LAUNCH_SPEED: full R2 from standstill spins the rear out
+LAUNCH_SPEED = float(env('LAUNCH_SPEED', '120'))  # km/h
 RETRY_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.retry')  # touch it: retry the race now
 STRAIGHT_TIME = float(env('STRAIGHT_TIME', '15'))
 MAINTENANCE_RACES = int(env('MAINTENANCE_RACES', '20'))
@@ -111,9 +113,11 @@ class Pilot:
         for stale in (TAPS_FILE, RETRY_FILE):
             if os.path.exists(stale):
                 os.remove(stale)
+        # (before the telemetry thread, whose on_packet reads them)
+        self.override_until, self.nitro_on, self.r2_on, self.off_line = 0.0, False, False, False
+        self.r2_level = 0.0
         self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
-        self.override_until, self.nitro_on, self.r2_on, self.off_line = 0.0, False, False, False
         threading.Thread(target=self.drive, daemon=True).start()
         if TRAFFIC != 'off' and WINDOW_ID:
             threading.Thread(target=self.watch_traffic, daemon=True).start()
@@ -147,6 +151,11 @@ class Pilot:
         try:
             if not t['on_track'] or t['paused'] or t['laps'] <= 0:
                 return
+            if self.r2_on:
+                level = 1.0 if t['speed'] >= LAUNCH_SPEED else LAUNCH_THROTTLE
+                if level != self.r2_level:
+                    self.r2_level = level
+                    self.pad.r2(level)
             stick = self.line.update(t) if self.line else None
             self.count_lap(t, stick)
             if stick is not None:
@@ -265,9 +274,13 @@ class Pilot:
 
     def throttle(self, on):
         """Hold R2 down, or let it go. The pad only sends changes, and GT7 drops the one
-        sent while a race loads, so drive() keeps nudging it while it is down."""
+        sent while a race loads, so drive() keeps nudging it while it is down. Below
+        LAUNCH_SPEED it is held at LAUNCH_THROTTLE (on_packet raises it): with traction
+        control 3, full R2 from the grid spun the rear wheels, the car turned right on the
+        banking and stuck nose-first in the wall, three starts in a row (2026-10-30 02:12)."""
         self.r2_on = on
-        self.pad.r2(1.0 if on else 0.0)
+        self.r2_level = LAUNCH_THROTTLE if on else 0.0
+        self.pad.r2(self.r2_level)
 
     def drive(self):
         """Steer like the key taps: the left stick fully right briefly, again and again,
@@ -277,8 +290,9 @@ class Pilot:
             while self.running:
                 if self.r2_on and time.time() - nudged >= 1.0:
                     nudged = time.time()
-                    self.pad.r2(0.98)
-                    self.pad.r2(1.0)
+                    level = self.r2_level
+                    self.pad.r2(level - 0.02)
+                    self.pad.r2(level)
                 if self.steering and self.taps:
                     self.pad.stick(1.0)
                     time.sleep(TAP_LENGTH)
