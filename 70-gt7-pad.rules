@@ -1,0 +1,4 @@
+# Let the desktop user's programs (Chiaki) open the virtual pad that gt7/pad.py makes.
+# Install: sudo install -m 644 70-gt7-pad.rules /etc/udev/rules.d/ && sudo udevadm control --reload
+# (the number must stay below 73, where udev turns the uaccess tag into permissions)
+SUBSYSTEMS=="input", ATTRS{name}=="GT7 Autopilot Pad", TAG+="uaccess"

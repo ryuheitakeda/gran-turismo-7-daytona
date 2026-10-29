@@ -128,6 +128,13 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - `./gt7-analyze.py <recording.gt7tel>` needs [uv](https://docs.astral.sh/uv/), which installs matplotlib for it.  For each lap it prints the lap time, the top and average speed, the steering, and "scrape": the share of the lap at full throttle while losing speed, a rough sign of rubbing the wall.  It saves charts next to the recording: the line driven coloured by speed, the speed over each lap, and the steering over 20 seconds.
 - `./gt7-screen.py snap <file.png>` saves a screenshot of the Chiaki stream window, and `./gt7-screen.py record --every 1 <dir> <label>` keeps saving them.  They show the game only on a display Chiaki draws its video on; on Chrome Remote Desktop's virtual display they show Chiaki's host list.
 
+## Virtual gamepad
+
+- Keys can only push the stick all the way.  A virtual gamepad (Linux uinput) can send any stick and trigger value, and doesn't depend on which window has the focus.  Chiaki reads it like a real pad and adds it to the keys.  It looks like an Xbox 360 pad: A is cross, B circle, X square, Y triangle, START options.
+- `/dev/uinput` must be writable for you; on this setup Sunshine's udev rule already does that.  For Chiaki to open the pad, install the rule once: `sudo install -m 644 70-gt7-pad.rules /etc/udev/rules.d/ && sudo udevadm control --reload`.
+- `./gt7-pad.py check` makes the pad, checks that Chiaki opened it and removes it, without pressing anything.  `./gt7-pad.py press <button>` and `./gt7-pad.py hold <button>` press a button (cross, circle, square, triangle, l1, r1, share, options, l3, r3, up, down, left, right).  Only press buttons while the script is not racing.
+- The pad disappears when its process ends, even with `kill -9`, so nothing stays pressed.
+
 ## Web page
 
 - `./gt7-web.py start` serves a page on the computer's Tailscale address, port 8077 (`WEB_ADDRESS`, `WEB_PORT`); `stop` and `status` work as for the script.
@@ -159,6 +166,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   - Press X twice before the first race, because the start screen hides its menu when left alone
   - Read GT7 telemetry (`PLAYSTATION_IP`): check the race started, end the race at the finish line, quit when the car is stuck, log the position and best lap
   - Web page with live telemetry and credits per hour, with start, stop-after-race and emergency stop buttons; dates in the log
+  - A virtual gamepad (`gt7/pad.py`, `gt7-pad.py`, `70-gt7-pad.rules`) to send analog values to Chiaki
   - Record every telemetry packet and screenshots of each menu step for analysis (`TELEMETRY_RECORD`, `SCREEN_RECORD`, `gt7-analyze.py`, `gt7-screen.py`); read the steering angle (heartbeat B) and log the packets received and lost per race
   - Time the race by the clock, drive straight for `STRAIGHT_TIME` after the start, grid start; `RACE_TIME` and `RACE_PRIZE` re-measured
   - Release all keys on any exit and log an error when the stream window disappears
