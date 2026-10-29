@@ -338,8 +338,24 @@ class Pilot:
             # the first X fills in the credits: before the next one the balance is final
             self.reward_presses += 1
             if self.reward_presses == 2 and self.last_image:
-                self.balance_after = screen.read_number(self.last_image, screen.REWARD_BALANCE)
+                self.balance_after = self.read_balance(self.last_image)
                 self.keep_shot('reward', self.last_image)
+
+    def read_balance(self, image):
+        """The balance on the rewards screen, or None. Its digits are white, or pink for a
+        moment after they change, and the usual threshold reads pink ones as thin strokes
+        ('8' for 807,283,200 on 2026-10-30). A lower one reads pink but merges white digits
+        (5 as 9), so it is tried only when the usual reading comes out cut short, and kept
+        only when it fits the balance before the race."""
+        before = self.balance_before
+        value = screen.read_number(image, screen.REWARD_BALANCE, bright=150)
+        if value is not None and value >= 1000000 and (not before or len(str(value)) >= len(str(before))):
+            return value
+        if before:
+            value = screen.read_number(image, screen.REWARD_BALANCE, bright=120)
+            if value is not None and 0 < value - before <= 1.2 * RACE_PRIZE:
+                return value
+        return None
 
     def retry_race(self):
         """Pause the race and pick Retry; it restarts at the grid. True when the race shows again."""
@@ -539,6 +555,13 @@ class Pilot:
                             stuck, self.taps = True, True
                             log('  The car is stuck (lap %d, %d km/h for %ds); driving on with taps'
                                 % (t['lap'], t['speed'], STUCK_TIME))
+                            if t['lap'] == 0:
+                                # still on the grid: twice R2 pressed after the race had shown went
+                                # unseen (2026-10-29 23:06, 2026-10-30 01:06); let go and press again
+                                self.throttle(False)
+                                self.pause(0.5)
+                                self.throttle(True)
+                                log('  Still on the grid: R2 let go and pressed again')
                         if STUCK_RETRY > 0 and now - slow_since >= STUCK_RETRY and not retried \
                                 and screen.references():  # the pause menu is told by the screen
                             retried = True
