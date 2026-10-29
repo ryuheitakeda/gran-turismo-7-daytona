@@ -72,7 +72,7 @@ SHOTS_KEPT = 50  # laps this much slower than after the last maintenance: say so
 STEER_PROBE = env('STEER_PROBE', '') == '1'  # line: find the stick's dead zone once, on lap 3's back straight
 PROBE_FROM, PROBE_TO, PROBE_MAX = 1700, 2300, 0.3  # metres along the line, and the stick it ramps up to (right)
 TAPS_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.taps')  # touch it: back to taps
-LOST = 8.0  # line: metres off the line at which it gives up and taps for the rest of the race
+LOST = 8.0  # line: metres off the line at which it stops steering and drives straight until back within half of it
 
 
 def log(text):
@@ -113,7 +113,7 @@ class Pilot:
                 os.remove(stale)
         self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
-        self.override_until, self.nitro_on, self.r2_on = 0.0, False, False
+        self.override_until, self.nitro_on, self.r2_on, self.off_line = 0.0, False, False, False
         threading.Thread(target=self.drive, daemon=True).start()
         if TRAFFIC != 'off' and WINDOW_ID:
             threading.Thread(target=self.watch_traffic, daemon=True).start()
@@ -188,13 +188,22 @@ class Pilot:
             if t['packet_id'] % 30 == 0 and os.path.exists(TAPS_FILE):
                 self.taps = True
                 log('  Steering with taps from now on, as asked (%s)' % TAPS_FILE)
-            elif abs(self.line.d) > LOST:
-                self.taps = True
-                log('WARNING: %.1f m off the track line; steering with taps for the rest of the race' % self.line.d)
-            elif time.time() < self.override_until:
-                self.pad.stick(TRAFFIC_STICK)  # moving inside past a car ahead
+            elif abs(self.line.d) > (LOST / 2 if self.off_line else LOST):
+                # thrown off the line (hit by a car, spun): drive straight, without steering, until
+                # the banking takes the car back out to the wall. Taps there pushed the slow car
+                # into the wall again and again until the race had to be retried (2026-10-30 01:57)
+                if not self.off_line:
+                    self.off_line = True
+                    log('WARNING: %.1f m off the track line; driving straight until back on it' % self.line.d)
+                self.pad.stick(0.0)
             else:
-                self.pad.stick(stick)
+                if self.off_line:
+                    self.off_line = False
+                    log('  Back on the track line (%.1f m off it)' % self.line.d)
+                if time.time() < self.override_until:
+                    self.pad.stick(TRAFFIC_STICK)  # moving inside past a car ahead
+                else:
+                    self.pad.stick(stick)
         if NITRO == 'straights' and self.line:
             station = self.line.hint * driver.SPACING
             want = self.steering and any(a <= station <= b for a, b in NITRO_ZONES)
@@ -538,6 +547,7 @@ class Pilot:
                     % (datetime.datetime.now() + datetime.timedelta(seconds=RACE_TIME)).strftime('%H:%M:%S'))
             self.snap_every(30, 'race')
             self.taps = DRIVE != 'line' or not self.line
+            self.off_line = False
             self.race_laps = []
             started = time.time()
             steer_start, race_end = started + STRAIGHT_TIME, started + RACE_TIME
@@ -552,9 +562,11 @@ class Pilot:
                     if not t['paused'] and t['speed'] < STUCK_SPEED and (t['lap'] >= 1 or now >= steer_start):
                         slow_since = slow_since or now
                         if now - slow_since >= STUCK_TIME and not stuck:
-                            # keep R2 down and tap on: GT7 puts a car that's stuck back on the track
-                            stuck, self.taps = True, True
-                            log('  The car is stuck (lap %d, %d km/h for %ds); driving on with taps'
+                            # keep R2 down and drive on as before: GT7 puts a car that's stuck back on
+                            # the track (taps, which the line used to switch to here, only pushed a
+                            # slow car into the wall again)
+                            stuck = True
+                            log('  The car is stuck (lap %d, %d km/h for %ds); driving on'
                                 % (t['lap'], t['speed'], STUCK_TIME))
                             if t['lap'] == 0:
                                 # still on the grid: twice R2 pressed after the race had shown went
