@@ -492,8 +492,11 @@ class Pilot:
         money, miles = 0, 0.0
         if os.path.exists(STOP_FILE):
             os.remove(STOP_FILE)
+        restarted = False
         while True:
-            if os.path.exists(STOP_FILE):
+            # (not right after a retry: the race runs again from the grid, and a new script
+            # taking it over late left the car on the wall at the start, 2026-10-30 01:58)
+            if os.path.exists(STOP_FILE) and not restarted:
                 os.remove(STOP_FILE)
                 log('Stopped after the race as requested; the game is at the start screen')
                 return
