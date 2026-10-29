@@ -37,6 +37,7 @@ RACE_TIME = float(env('RACE_TIME', '800'))
 START_TIMEOUT = float(env('START_TIMEOUT', '15'))
 STUCK_SPEED = float(env('STUCK_SPEED', '30'))
 STUCK_TIME = float(env('STUCK_TIME', '5'))
+STUCK_GIVE_UP = float(env('STUCK_GIVE_UP', '60'))  # stuck this long: give up (GT7 puts a stuck car back sooner)
 STRAIGHT_TIME = float(env('STRAIGHT_TIME', '15'))
 MAINTENANCE_RACES = int(env('MAINTENANCE_RACES', '20'))
 LAPS = int(env('LAPS', '10'))
@@ -350,7 +351,7 @@ class Pilot:
             self.taps = DRIVE != 'line' or not self.line
             started = time.time()
             steer_start, race_end = started + STRAIGHT_TIME, started + RACE_TIME
-            slow_since, checked, result = None, started, ''
+            slow_since, stuck, checked, result = None, False, started, ''
             while True:
                 t, now = self.rx.fresh(), time.time()
                 if t:
@@ -359,10 +360,18 @@ class Pilot:
                         break
                     if not t['paused'] and t['speed'] < STUCK_SPEED and (t['lap'] >= 1 or now >= steer_start):
                         slow_since = slow_since or now
-                        if now - slow_since >= STUCK_TIME:
+                        if now - slow_since >= STUCK_TIME and not stuck:
+                            # keep R2 down and tap on: GT7 puts a car that's stuck back on the track
+                            stuck, self.taps = True, True
+                            log('  The car is stuck (lap %d, %d km/h for %ds); driving on with taps'
+                                % (t['lap'], t['speed'], STUCK_TIME))
+                        if now - slow_since >= STUCK_GIVE_UP:
                             raise Quit(1, 'ERROR: the car is stuck (lap %d, %d km/h for %ds)'
-                                       % (t['lap'], t['speed'], STUCK_TIME))
+                                       % (t['lap'], t['speed'], STUCK_GIVE_UP))
                     else:
+                        if stuck:
+                            stuck = False
+                            log('  Moving again (lap %d, %d km/h)' % (t['lap'], t['speed']))
                         slow_since = None
                     if now >= race_end + 120:
                         raise Quit(1, 'ERROR: no finish after %ds (lap %d of %d)'

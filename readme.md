@@ -85,7 +85,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   ```
 
 - `PLAYSTATION_IP` (default empty): your Playstation's IP address.  When set, the script reads GT7's telemetry (see below) to check that the race started, to end the race at the finish line, and to quit when the car gets stuck.
-- `START_TIMEOUT` (default 15), `STUCK_SPEED` (default 30) and `STUCK_TIME` (default 5): with telemetry, quit when the car isn't on track that many seconds after pressing X, or stays below `STUCK_SPEED` km/h for `STUCK_TIME` seconds during the race.
+- `START_TIMEOUT` (default 15), `STUCK_SPEED` (default 30) and `STUCK_TIME` (default 5): with telemetry, quit when the car isn't on track that many seconds after pressing X, or stays below `STUCK_SPEED` km/h for `STUCK_TIME` seconds during the race.  With `PILOT=1` a stuck car doesn't end the run: it logs it and drives on with R2 and taps, because GT7 puts a car that's stuck back on the track, and only quits when it is still stuck after `STUCK_GIVE_UP` seconds (default 60).
 - `RACE_TIME` (default 800): seconds from the "Race start" log line until you cross the finish line.  It was measured with the grid start above; you will need to set it according to your vehicle speed.  With telemetry it is only used when the telemetry stops coming.
   - If you're not sure, start with the time it takes to rubber-band the race.
 - `STRAIGHT_TIME` (default 15): seconds to drive straight after the start before steering towards the wall.
@@ -184,6 +184,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   - Press X twice before the first race, because the start screen hides its menu when left alone
   - Read GT7 telemetry (`PLAYSTATION_IP`): check the race started, end the race at the finish line, quit when the car is stuck, log the position and best lap
   - Web page with live telemetry and credits per hour, with start, stop-after-race and emergency stop buttons; dates in the log
+  - With `PILOT=1`, drive on with taps when the car gets stuck, and only quit after `STUCK_GIVE_UP` seconds
   - Steer by the track line from the telemetry, or just log what that would do (`DRIVE`, `gt7-analyze.py track`, `gt7/driver.py`)
   - Go through the screens after the race by looking at them, skipping the scene after the finish (`MENUS`, `gt7-screen.py learn`, `classify`, `to-start`)
   - Fix the presses after the race for the current GT7 (two X fewer, so it no longer goes back into the replay) and hold each menu key exactly `KEYPRESS_LENGTH`

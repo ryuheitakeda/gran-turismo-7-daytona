@@ -44,7 +44,8 @@ RACE_TIME=${RACE_TIME:-800} # seconds from "Race start" to crossing the finish l
 SCREEN_RECORD=${SCREEN_RECORD:-} # directory to keep screenshots of the menus and the race in (needs xwd), empty for none
 START_TIMEOUT=${START_TIMEOUT:-15} # with telemetry, quit if the car isn't on track this many seconds after X
 STUCK_SPEED=${STUCK_SPEED:-30} # with telemetry, km/h below which the car counts as stuck
-STUCK_TIME=${STUCK_TIME:-5} # with telemetry, quit after being stuck this many seconds
+STUCK_TIME=${STUCK_TIME:-5} # with telemetry, quit after being stuck this many seconds (PILOT=1: drive on with taps)
+STUCK_GIVE_UP=${STUCK_GIVE_UP:-60} # with PILOT=1, quit when still stuck after this many seconds
 STRAIGHT_TIME=${STRAIGHT_TIME:-15} # seconds to drive straight after the start to avoid hitting cars ahead
 CURVE_STICK=${CURVE_STICK:-0} # with DRIVE=line, left stick added in the sharpest bend, less in gentler ones
 STEER_KD=${STEER_KD:-0.1} # with DRIVE=line, stick per metre off the aim
@@ -302,7 +303,7 @@ if [ "$PILOT" = 1 ]; then
   export PLAYSTATION_IP TELEMETRY_FILE TELEMETRY_RECORD SCREEN_DIR WINDOW_ID WINDOW_NAME STOP_FILE PAD MENUS \
     KEYPRESS_LENGTH FINISH_WAIT RACE_PRIZE RACE_TIME START_TIMEOUT STUCK_SPEED STUCK_TIME STRAIGHT_TIME \
     MAINTENANCE_RACES LAPS LAP_MILES TAP_LENGTH TAP_INTERVAL DRIVE WALL_GAP STEER_KD STEER_KPSI STEER_MAX \
-    MENU_TRACE DPAD_LENGTH CURVE_STICK STEER_PROBE
+    MENU_TRACE DPAD_LENGTH CURVE_STICK STEER_PROBE STUCK_GIVE_UP
   "$(dirname "$0")/gt7-pilot.py" 9>&- &
   status=0
   wait $! || status=$?
