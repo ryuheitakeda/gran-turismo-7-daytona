@@ -24,18 +24,30 @@ NEXT = {
 STEPS = {'standings': 'Standings', 'rewards': 'Rewards', 'replay': 'Replay', 'result/retry': 'Retry'}
 
 
-def to_start(press, look, log=lambda text: None, timeout=150, pause=time.sleep):
+def to_start(press, look, log=lambda text: None, timeout=150, pause=time.sleep, wake=None):
     """Press through the screens after a race until the start screen shows with
     the cursor on Start. press(button) presses 'cross', 'circle', 'left' or
     'right'; look() returns gt7.screen.classify's name for the screen now.
-    Logs each step the first time it shows. Returns True at the start screen,
-    False when it isn't reached in time (the screen is then unknown or stuck)."""
+    Logs each step the first time it shows. With wake=seconds, press X once
+    when the screen has been unknown that long: the start screen hides its
+    menu after a while without input, and X brings it back. Returns True at the
+    start screen, False when it isn't reached in time."""
     deadline = time.time() + timeout
     seen = set()
+    unknown_since = None
     while time.time() < deadline:
         name = look()
         if name == 'start/start':
             return True
+        if name == 'unknown' and wake is not None:
+            unknown_since = unknown_since or time.time()
+            if time.time() - unknown_since >= wake:
+                press('cross')
+                wake = None
+                pause(1.0)
+                continue
+        else:
+            unknown_since = None
         step = STEPS.get(name)
         if step and step not in seen:
             seen.add(step)

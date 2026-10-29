@@ -106,7 +106,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - With your low PP tune selected, start a custom race at Daytona and load the custom race settings.
 - Enter the race itself.  Switch to your high PP tune.
 - With the arrow on the Start button, start the script.
-  - The start screen hides its menu after a while without input, and the first X press only brings it back.  So before the first race the script presses X twice, 2 seconds apart; if the menu was showing, the second press lands on the loading screen.
+  - The start screen hides its menu after a while without input, and the first X press only brings it back.  So before the first race the script presses X twice, 2 seconds apart; if the menu was showing, the second press lands on the loading screen.  With the screens learned (`MENUS=screen`), it looks at the screen before every race instead, and presses X once to wake it when the menu has hidden.
   - `./gt7-daytona.sh` runs it in the terminal.  When you're done, exit the script by pressing `CTRL+C`.
   - `./gt7-daytona.sh start` runs it in the background and writes the log to `~/gt7-daytona.log`.  Use `./gt7-daytona.sh status`, `./gt7-daytona.sh log` and `./gt7-daytona.sh stop` to check on it and stop it.
   - From an SSH session, set `DISPLAY` to the desktop that shows Chiaki (e.g. `DISPLAY=:20` in the config file).
