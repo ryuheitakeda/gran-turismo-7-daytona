@@ -18,6 +18,8 @@ import subprocess
 import sys
 import time
 
+from gt7 import races
+
 HOME = os.path.expanduser('~')
 LOG_FILE = os.environ.get('LOG_FILE', os.path.join(HOME, 'gt7-daytona.log'))
 CACHE = os.environ.get('XDG_CACHE_HOME', os.path.join(HOME, '.cache'))
@@ -27,6 +29,7 @@ STOP_FILE = os.environ.get('STOP_FILE', os.path.join(CACHE, 'gt7-daytona.stop-af
 SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gt7-daytona.sh')
 WEB_LOG = os.path.join(HOME, 'gt7-web.log')
 WEB_PORT = int(os.environ.get('WEB_PORT', '8077'))
+MAINT_LAP_PCT = float(os.environ.get('MAINT_LAP_PCT', '1.5'))
 RUNTIME = os.environ.get('XDG_RUNTIME_DIR', '/run/user/%d' % os.getuid())
 
 FIELDS = ('time', 'on_track', 'paused', 'loading', 'lap', 'laps', 'speed', 'position',
@@ -112,13 +115,28 @@ def earnings():
     }
 
 
+def engine():
+    """The median laps of the recent races and how they compare with after the last maintenance."""
+    records = races.load()
+    kept = [r for r in races.since_maintenance(records) if r.get('median')]
+    last = max((r['maintenance'] for r in records if 'maintenance' in r), default=None)
+    recent = [r for r in records if 'maintenance' not in r and r.get('median')][-30:]
+    return {
+        'races': [{'time': r['time'], 'median': r['median'], 'max_speed': r.get('max_speed'),
+                   'drive': r.get('drive')} for r in recent],
+        'wear': races.wear(records, kept[-1]['drive']) if kept else None,
+        'since': last, 'count': len(kept), 'limit': MAINT_LAP_PCT, 'window': races.WINDOW,
+    }
+
+
 def state():
     return {'telemetry': telemetry(), 'running': script_running(),
-            'stop_after_race': os.path.exists(STOP_FILE), **earnings()}
+            'stop_after_race': os.path.exists(STOP_FILE), 'engine': engine(), **earnings()}
 
 
 ACTIONS = {'start': ['start'], 'stop-after-race': ['stop-after-race'],
-           'cancel-stop': ['cancel-stop'], 'emergency-stop': ['stop']}
+           'cancel-stop': ['cancel-stop'], 'emergency-stop': ['stop'],
+           'maintenance-done': ['maintenance-done']}
 
 
 def run_script(action):
@@ -214,6 +232,18 @@ pre { margin: 0; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; 
     </table>
     <p class="note">1位で終えたレースを、1レースあたりの賞金（1位＋クリーンレースボーナス）で数えた推定値です。</p>
   </section>
+  <section class="card">
+    <h2>エンジンの状態 <span id="wear_badge" class="badge" style="margin-left:6px">–</span></h2>
+    <div><span class="big" id="wear_now">–</span><span class="unit">直近 5 レースの中央値ラップ</span></div>
+    <table>
+      <tr><td>メンテナンス後の 5 レース</td><td id="wear_base">–</td></tr>
+      <tr><td>差</td><td id="wear_pct">–</td></tr>
+      <tr><td>メンテナンス（<span id="wear_since">–</span>）からのレース</td><td id="wear_count">–</td></tr>
+    </table>
+    <svg id="wear_chart" viewBox="0 0 300 60" preserveAspectRatio="none" style="width:100%;height:60px;margin-top:8px"></svg>
+    <div class="controls" style="margin-top:8px"><button onclick="maintenance()">メンテナンスしました</button></div>
+    <p class="note">レースごとの 2〜10 周の中央値ラップで比べています。走り方（タップ・基準線）が同じレースだけを比べ、メンテナンス後 10 レースたつと差が出ます。</p>
+  </section>
   <section class="card" style="grid-column: 1 / -1">
     <h2>ログ</h2>
     <pre id="log"></pre>
@@ -233,6 +263,24 @@ async function act(action) {
   update();
 }
 const toggleStop = () => act(stopPlanned ? 'cancel-stop' : 'stop-after-race');
+const maintenance = () => { if (confirm('オイル交換かエンジンのオーバーホールをしましたか？ 次の 5 レースが新しい基準になります。')) act('maintenance-done'); };
+function engine(e) {
+  const w = e.wear, lap = sec => lapTime(Math.round(sec * 1000));
+  $('wear_now').textContent = w ? lap(w.now) : (e.races.length ? lap(e.races[e.races.length - 1].median) : '–');
+  $('wear_base').textContent = w ? lap(w.base) : `あと ${Math.max(0, 2 * e.window - e.count)} レース`;
+  $('wear_pct').textContent = w ? `${w.percent >= 0 ? '+' : ''}${w.percent.toFixed(1)}%` : '–';
+  $('wear_since').textContent = e.since ? e.since.slice(5, 16).replace('T', ' ') : '記録なし';
+  $('wear_count').textContent = e.count;
+  const bad = w && w.percent >= e.limit;
+  $('wear_badge').textContent = !w ? '基準づくり中' : bad ? 'メンテナンスの目安' : '良好';
+  $('wear_badge').className = 'badge ' + (bad ? 'warn' : w ? 'ok' : '');
+  const m = e.races.map(r => r.median);
+  if (m.length > 1) {
+    const lo = Math.min(...m), hi = Math.max(...m), span = hi - lo || 1;
+    const pts = m.map((v, i) => `${(300 * i / (m.length - 1)).toFixed(1)},${(55 - 50 * (v - lo) / span).toFixed(1)}`).join(' ');
+    $('wear_chart').innerHTML = `<polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.5" />`;
+  }
+}
 const fmt = n => Math.round(n).toLocaleString('ja-JP');
 const lapTime = ms => ms > 0 ? `${Math.floor(ms / 60000)}:${((ms % 60000) / 1000).toFixed(3).padStart(6, '0')}` : '–';
 const hours = h => `${Math.floor(h)}時間${String(Math.round((h % 1) * 60)).padStart(2, '0')}分`;
@@ -270,6 +318,7 @@ async function update() {
   $('today_races').textContent = `${d.races} / ${d.wins}`;
   $('today_per_hour').textContent = `${fmt(d.per_hour)} Cr`;
   $('log').textContent = s.log.join('\\n');
+  engine(s.engine);
 }
 update(); setInterval(update, 1000);
 </script>

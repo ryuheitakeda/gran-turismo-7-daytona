@@ -5,10 +5,11 @@
 # This work © 2025 by Jason Lonsberry is licensed under CC BY-NC-SA 4.0.
 # To view a copy of this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
 
-# Usage: gt7-daytona.sh [start|stop|stop-after-race|cancel-stop|status|log [lines]]
+# Usage: gt7-daytona.sh [start|stop|stop-after-race|cancel-stop|status|log [lines]|maintenance-done]
 #   no argument  run in the foreground, quit with CTRL+C
 #   start        run in the background, writing to $LOG_FILE
 #   stop-after-race  stop at the start screen once the current race is over
+#   maintenance-done  the oil or the engine was seen to: the next races set the laps to compare with
 
 set -e
 
@@ -33,9 +34,11 @@ LOG_FILE=${LOG_FILE:-$HOME/gt7-daytona.log}
 STOP_FILE=${STOP_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.stop-after-race}
 DRIVE=${DRIVE:-pwm} # with PILOT=1: pwm (taps), shadow (taps, and log what line would do), line (steer by the track line)
 MAINTENANCE_RACES=${MAINTENANCE_RACES:-20} # remind to check the engine every N races, 0 to turn off
+MAINT_LAP_PCT=${MAINT_LAP_PCT:-1.5} # with PILOT=1, say so when the laps are this many percent slower than after the last maintenance
 MENUS=${MENUS:-auto} # after the race: screen (look before each press), timer, or auto (screen once learned)
 PAD=${PAD:-uinput} # with PILOT=1: uinput for the virtual gamepad, dry to only log it (tests)
 PILOT=${PILOT:-0} # 1: race with gt7-pilot.py and the virtual gamepad instead of the loop below
+RACES_FILE=${RACES_FILE:-$HOME/gt7-races.jsonl} # with PILOT=1, one line per race (lap times, top speed) for the engine wear
 PLAYSTATION_IP=${PLAYSTATION_IP:-} # set to read GT7 telemetry: detect the start, the finish and a stuck car
 QUICKPRESS_LENGTH=${QUICKPRESS_LENGTH:-0.01}
 FINISH_WAIT=${FINISH_WAIT:-8} # with telemetry, seconds from the finish line to the first X
@@ -224,8 +227,13 @@ case "$1" in
     tail -n "${2:-30}" "$LOG_FILE"
     exit
     ;;
+  maintenance-done)
+    printf '{"maintenance": "%s"}\n' "$(date -Iseconds)" >> "$RACES_FILE"
+    echo 'Noted: the next 5 races set the laps to compare with'
+    exit
+    ;;
   *)
-    echo "Usage: $0 [start|stop|stop-after-race|cancel-stop|status|log [lines]]" >&2
+    echo "Usage: $0 [start|stop|stop-after-race|cancel-stop|status|log [lines]|maintenance-done]" >&2
     exit 2
     ;;
 esac
@@ -303,7 +311,7 @@ if [ "$PILOT" = 1 ]; then
   export PLAYSTATION_IP TELEMETRY_FILE TELEMETRY_RECORD SCREEN_DIR WINDOW_ID WINDOW_NAME STOP_FILE PAD MENUS \
     KEYPRESS_LENGTH FINISH_WAIT RACE_PRIZE RACE_TIME START_TIMEOUT STUCK_SPEED STUCK_TIME STRAIGHT_TIME \
     MAINTENANCE_RACES LAPS LAP_MILES TAP_LENGTH TAP_INTERVAL DRIVE WALL_GAP STEER_KD STEER_KPSI STEER_MAX \
-    MENU_TRACE DPAD_LENGTH CURVE_STICK STEER_PROBE STUCK_GIVE_UP
+    MENU_TRACE DPAD_LENGTH CURVE_STICK STEER_PROBE STUCK_GIVE_UP RACES_FILE MAINT_LAP_PCT
   "$(dirname "$0")/gt7-pilot.py" 9>&- &
   status=0
   wait $! || status=$?

@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 
-from gt7 import driver, menus, pad, screen, telemetry
+from gt7 import driver, menus, pad, races, screen, telemetry
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 env = os.environ.get
@@ -52,6 +52,7 @@ STEER_KPSI = float(env('STEER_KPSI', '1.0'))  # line: stick per radian of headin
 STEER_MAX = float(env('STEER_MAX', '0.3'))  # line: the most stick either way
 CURVE_STICK = float(env('CURVE_STICK', '0'))  # line: left stick added in the sharpest bend (less elsewhere)
 MENU_TRACE = env('MENU_TRACE', '') == '1'  # log every press on the screens after the race
+MAINT_LAP_PCT = float(env('MAINT_LAP_PCT', '1.5'))  # laps this much slower than after the last maintenance: say so
 STEER_PROBE = env('STEER_PROBE', '') == '1'  # line: find the stick's dead zone once, on lap 3's back straight
 PROBE_FROM, PROBE_TO, PROBE_MAX = 1700, 2300, 0.3  # metres along the line, and the stick it ramps up to (right)
 TAPS_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.taps')  # touch it: back to taps
@@ -82,7 +83,7 @@ class Pilot:
         self.snaps = []
         self.snapper = None
         self.pad = pad.DryPad() if env('PAD') == 'dry' else pad.Pad()
-        self.line, self.taps, self.lap_log = None, DRIVE != 'line', {}
+        self.line, self.taps, self.lap_log, self.race_laps = None, DRIVE != 'line', {}, []
         if DRIVE in ('shadow', 'line'):
             try:
                 self.line = driver.LineDriver(driver.Track.load(), WALL_GAP, STEER_KD, STEER_KPSI, STEER_MAX,
@@ -120,36 +121,46 @@ class Pilot:
             time.sleep(min(left, 0.1))
 
     def on_packet(self, t):
-        """Every packet: the line driver's stick, applied with DRIVE=line, and a log
-        line per lap of how far the car was from the line and how it steered."""
+        """Every packet: each lap's time and top speed (logged when it ends), and with a
+        track line, how far the car was from it and the stick it gives (used with DRIVE=line)."""
         try:
-            self.steer_by_line(t)
+            if not t['on_track'] or t['paused'] or t['laps'] <= 0:
+                return
+            stick = self.line.update(t) if self.line else None
+            self.count_lap(t, stick)
+            if stick is not None:
+                self.steer_by_line(t, stick)
         except Exception as e:  # never let it stop the telemetry
             if not self.taps:
                 self.taps = True
                 log('WARNING: steering by the line failed (%r); steering with taps' % e)
 
-    def steer_by_line(self, t):
-        if not self.line or not t['on_track'] or t['paused'] or t['laps'] <= 0:
-            return
-        stick = self.line.update(t)
+    def count_lap(self, t, stick):
         lap = self.lap_log
         if t['lap'] != lap.get('lap'):
             if lap.get('n', 0) >= 600 and 1 <= lap['lap'] <= t['laps']:  # a whole lap, not the start
-                log('  Lap %d %s max %d km/h, d %.2f m (%.2f..%.2f), heading %.1f deg, stick %.3f (%s)' % (
-                    lap['lap'], lap_time(round(1000 * (t['time'] - lap['start']))), lap['vmax'],
-                    lap['d'] / lap['n'], lap['dmin'], lap['dmax'],
-                    math.degrees(lap['psi'] / lap['n']), lap['stick'] / lap['n'],
-                    'taps' if self.taps else DRIVE))
+                seconds = t['time'] - lap['start']
+                self.race_laps.append((lap['lap'], seconds, lap['vmax']))
+                text = '  Lap %d %s max %d km/h' % (lap['lap'], lap_time(round(1000 * seconds)), lap['vmax'])
+                if lap['line']:
+                    text += ', d %.2f m (%.2f..%.2f), heading %.1f deg, stick %.3f (%s)' % (
+                        lap['d'] / lap['line'], lap['dmin'], lap['dmax'],
+                        math.degrees(lap['psi'] / lap['line']), lap['stick'] / lap['line'],
+                        'taps' if self.taps else DRIVE)
+                log(text)
             lap.clear()
-            lap.update(lap=t['lap'], n=0, d=0.0, psi=0.0, stick=0.0, dmin=99.0, dmax=-99.0,
-                       start=t['time'], vmax=0.0)
+            lap.update(lap=t['lap'], n=0, start=t['time'], vmax=0.0,
+                       line=0, d=0.0, psi=0.0, stick=0.0, dmin=99.0, dmax=-99.0)
         lap['n'] += 1
         lap['vmax'] = max(lap['vmax'], t['speed'])
-        lap['d'] += self.line.d
-        lap['psi'] += self.line.psi
-        lap['stick'] += stick
-        lap['dmin'], lap['dmax'] = min(lap['dmin'], self.line.d), max(lap['dmax'], self.line.d)
+        if stick is not None:
+            lap['line'] += 1
+            lap['d'] += self.line.d
+            lap['psi'] += self.line.psi
+            lap['stick'] += stick
+            lap['dmin'], lap['dmax'] = min(lap['dmin'], self.line.d), max(lap['dmax'], self.line.d)
+
+    def steer_by_line(self, t, stick):
         if DRIVE == 'line' and self.steering and not self.taps and self.probe(t):
             return
         if DRIVE == 'line' and self.steering and not self.taps:
@@ -198,6 +209,31 @@ class Pilot:
                     time.sleep(0.02)
         except (OSError, TypeError):
             pass  # the pad was closed on the way out
+
+    def keep_race(self, t, seconds):
+        """A line in RACES_FILE for the race just finished, and a word when the laps have
+        got slower than after the last maintenance (#22)."""
+        laps = sorted(self.race_laps)
+        later = sorted(s for n, s, v in laps if n >= 2)
+        record = {
+            'time': datetime.datetime.now().isoformat(timespec='seconds'),
+            'position': t['race_position'], 'seconds': round(seconds, 1),
+            'laps': [round(s, 3) for n, s, v in laps],
+            'median': round(later[len(later) // 2], 3) if later else None,
+            'best': t['best'] / 1000 if t['best'] > 0 else None,
+            'max_speed': round(max((v for n, s, v in laps), default=0)),
+            'drive': 'taps' if self.taps else DRIVE, 'prize': RACE_PRIZE,
+        }
+        try:
+            races.append(record)
+            state = races.wear(races.load(), record['drive'])
+        except OSError as e:
+            log('WARNING: cannot keep the race in %s (%s)' % (races.RACES_FILE, e))
+            return
+        if state and state['percent'] >= MAINT_LAP_PCT:
+            log('  Maintenance: the laps are %.1f%% slower than after the last one (%s against %s); '
+                'time for an oil change or an engine overhaul?' % (
+                    state['percent'], lap_time(round(1000 * state['now'])), lap_time(round(1000 * state['base']))))
 
     def menu_press(self, button):
         self.pad.press(button, DPAD_LENGTH if button in pad.DPAD else KEYPRESS_LENGTH)
@@ -352,6 +388,7 @@ class Pilot:
                     % (datetime.datetime.now() + datetime.timedelta(seconds=RACE_TIME)).strftime('%H:%M:%S'))
             self.snap_every(30, 'race')
             self.taps = DRIVE != 'line' or not self.line
+            self.race_laps = []
             started = time.time()
             steer_start, race_end = started + STRAIGHT_TIME, started + RACE_TIME
             slow_since, stuck, checked, result = None, False, started, ''
@@ -390,6 +427,8 @@ class Pilot:
             self.pad.stick(0.0)
 
             log('  Race ending' + result)
+            if result:
+                self.keep_race(t, time.time() - started)
             self.snap_every(1, 'menu')  # until the next race starts
             miles += round(LAP_MILES * LAPS, 1)
             money += RACE_PRIZE

@@ -91,6 +91,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - `STRAIGHT_TIME` (default 15): seconds to drive straight after the start before steering towards the wall.
 - `RACE_PRIZE` (default 9705000): only used to total the credits in the log.  If you use a different car or setup, set it to the reward you get.
 - `MAINTENANCE_RACES` (default 20): log a reminder to check the oil and engine every that many races; 0 turns it off.
+- `RACES_FILE` (default `~/gt7-races.jsonl`) and `MAINT_LAP_PCT` (default 1.5): with `PILOT=1`, each race's lap times and top speed go to `RACES_FILE`, and the log says when the laps are `MAINT_LAP_PCT` percent slower than after the last maintenance; see "Engine wear".
 - `TELEMETRY_RECORD` (default empty): with telemetry, a directory to record every packet in (about 70 MB an hour) for `gt7-analyze.py`; see "Recording and analysis".
 - `SCREEN_RECORD` (default empty): a directory to keep screenshots of the Chiaki window in: one before each menu press, named after the step, one a second from the finish to the next start, and one every 30 seconds during the race.  It needs `xwd` (`sudo apt install x11-apps`).
 - `QUICKPRESS_LENGTH` (default 0.01) and `KEYPRESS_LENGTH` (default 0.08): how long the steering taps and the menu presses last, in seconds.  For a steering tap the window is looked up again before the key is released, which adds about 0.04 seconds; the steering is tuned with that included.  Menu presses last exactly `KEYPRESS_LENGTH`: held longer, GT7 can move the cursor twice.
@@ -146,6 +147,12 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - With `CURVE_STICK` above 0 it also steers left where the line bends, by that much in the sharpest bend (30 m ahead), so the tyres take more of the turn and the wall less.
 - `DRIVE=shadow` taps as usual and logs each lap's d, heading and stick, to check the line before steering by it.  The analysis table shows each lap's d against the line too.
 
+## Engine wear
+
+- With `PILOT=1` the log has each lap's time and top speed, and `RACES_FILE` gets a line per race: its laps, the median of laps 2 on, the best lap, the top speed and the way it was steered.
+- After an oil change or an engine overhaul, run `./gt7-daytona.sh maintenance-done` (or press the web page's button).  The first 5 races after it set the laps to compare with.  When the median lap of the last 5 races is `MAINT_LAP_PCT` percent slower than those, the log and the web page say it's time to see to the engine.  Races steered differently (taps or the track line) aren't compared with each other.
+- The web page shows the median lap of each of the last 30 races.
+
 ## Virtual gamepad
 
 - Keys can only push the stick all the way.  A virtual gamepad (Linux uinput) can send any stick and trigger value, and doesn't depend on which window has the focus.  Chiaki reads it like a real pad and adds it to the keys.  It looks like an Xbox 360 pad: A is cross, B circle, X square, Y triangle, START options.
@@ -184,6 +191,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   - Press X twice before the first race, because the start screen hides its menu when left alone
   - Read GT7 telemetry (`PLAYSTATION_IP`): check the race started, end the race at the finish line, quit when the car is stuck, log the position and best lap
   - Web page with live telemetry and credits per hour, with start, stop-after-race and emergency stop buttons; dates in the log
+  - Each lap's time and top speed in the log, a line per race in `RACES_FILE`, and a word when the laps get slower than after the last maintenance (`maintenance-done`, the web page's engine card)
   - With `PILOT=1`, drive on with taps when the car gets stuck, and only quit after `STUCK_GIVE_UP` seconds
   - Steer by the track line from the telemetry, or just log what that would do (`DRIVE`, `gt7-analyze.py track`, `gt7/driver.py`)
   - Go through the screens after the race by looking at them, skipping the scene after the finish (`MENUS`, `gt7-screen.py learn`, `classify`, `to-start`)
