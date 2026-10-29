@@ -436,7 +436,7 @@ do
     # (if the next race has started on the way, the start below finds it running)
     release $KEY_R2
     on_screen=0
-    "$(dirname "$0")/gt7-screen.py" to-start --id "$WINDOW_ID" \
+    "$(dirname "$0")/gt7-screen.py" to-start --id "$WINDOW_ID" --after-race \
       --keys "$KEY_X,$KEY_O,$DPAD_L,$DPAD_R" 9>&- || on_screen=$?
     if [ $on_screen -ne 0 ] && [ $on_screen -ne 3 ]; then
       log 'ERROR: the screens after the race did not lead back to the start screen'

@@ -463,7 +463,8 @@ class Pilot:
                 self.reward_presses, self.balance_after = 0, None
                 refs, window = screen.references(), int(WINDOW_ID)
                 if not menus.to_start(self.menu_press, lambda: self.look(window, refs), log,
-                                      pause=self.pause, trace=self.trace):  # 'race': the next start finds it running
+                                      pause=self.pause, trace=self.trace, after_race=True):
+                    # ('race' after the screens after it: the next start finds it running)
                     raise Quit(1, 'ERROR: the screens after the race did not lead back to the start screen')
                 if self.balance_before and self.balance_after and self.balance_after > self.balance_before:
                     reward = self.balance_after - self.balance_before

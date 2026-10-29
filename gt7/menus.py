@@ -23,6 +23,8 @@ NEXT = {
     'start/exit': 'left',
 }
 STEPS = {'standings': 'Standings', 'rewards': 'Rewards', 'replay': 'Replay', 'result/retry': 'Retry'}
+AFTER_RACE = ('finish', 'standings', 'rewards', 'replay', 'replay-menu', 'result/replay', 'result/retry',
+              'result/exit', 'result/menu')  # once one of these has shown, the race is over
 # seconds a screen must stay before pressing: only the top bar also shows while the start
 # screen's menu fades in or out, and an X then lands on whatever button the cursor is on
 STABLE = {'start-idle': 3.0}
@@ -32,7 +34,8 @@ REPLAY_AFTER = ('rewards', 'replay')
 REPLAY_UNKNOWN = 4.0  # seconds
 
 
-def to_start(press, look, log=lambda text: None, timeout=150, pause=time.sleep, trace=None):
+def to_start(press, look, log=lambda text: None, timeout=150, pause=time.sleep, trace=None,
+             after_race=False):
     """Press through the screens after a race until the start screen shows with
     the cursor on Start. press(button) presses 'cross', 'circle', 'left' or
     'right'; look() returns gt7.screen.classify's name for the screen now.
@@ -40,18 +43,22 @@ def to_start(press, look, log=lambda text: None, timeout=150, pause=time.sleep, 
     every press. Nothing is pressed on a screen it doesn't know, except X in
     the replay after the rewards (see REPLAY_AFTER). Returns 'start/start', or
     'race' when the race has started (an X that should only bring back the
-    start screen's hidden menu can start it), or None when neither shows in time."""
+    start screen's hidden menu can start it), or None when neither shows in time.
+    With after_race (called at the finish line), the race still showing counts only
+    once a screen after the race has shown: right after the line it is this race."""
     deadline = time.time() + timeout
     seen = set()
-    last, since, known = None, time.time(), None
+    last, since, known, seen_after = None, time.time(), None, False
     while time.time() < deadline:
         name = look()
         if name != last:
             last, since = name, time.time()
         if name != 'unknown':
             known = name
-        if name in ('start/start', 'race'):
+        if name == 'start/start' or (name == 'race' and (not after_race or seen_after)):
             return name
+        if name in AFTER_RACE:
+            seen_after = True
         step = STEPS.get(name)
         if step and step not in seen:
             seen.add(step)

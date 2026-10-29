@@ -45,6 +45,8 @@ def main():
                         help='to-start: xdotool keys for cross, circle, left and right')
     parser.add_argument('--check', action='store_true', help='to-start: only check the references')
     parser.add_argument('--timeout', type=float, default=150, help='to-start: give up after these seconds')
+    parser.add_argument('--after-race', action='store_true',
+                        help='to-start: called at the finish line, so the race showing is this one until the screens after it have')
     parser.add_argument('args', nargs='*')
     args = parser.parse_intermixed_args()  # options may come between the command and its arguments
     a = args.args
@@ -108,7 +110,7 @@ def main():
         def log(text):
             print(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S ') + text, flush=True)
         reached = menus.to_start(press, lambda: screen.classify(screen.capture(win), refs)[0], log,
-                                 args.timeout)
+                                 args.timeout, after_race=args.after_race)
         sys.exit({'start/start': 0, 'race': 3}.get(reached, 1))
     else:
         parser.print_usage(sys.stderr)
