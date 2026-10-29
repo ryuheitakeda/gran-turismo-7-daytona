@@ -69,17 +69,23 @@ def capture(window):
     h = struct.unpack_from('>25I', data, 0)  # XWDFileHeader, always big-endian
     header_size, version, pixmap_format, width, height = h[0], h[1], h[2], h[4], h[5]
     byte_order, bits_per_pixel, bytes_per_line, ncolors = h[7], h[11], h[12], h[19]
-    if version != 7 or pixmap_format != 2 or bits_per_pixel != 32:
+    masks = h[14:17] if all(h[14:17]) else (0xff0000, 0xff00, 0xff)
+    # 32 bits a pixel, or 24 when the window has a visual of its own (Chiaki's stream
+    # window opened with `chiaki stream`)
+    if version != 7 or pixmap_format != 2 or bits_per_pixel not in (24, 32):
         raise RuntimeError('unsupported xwd image (version %d, format %d, %d bpp)'
                            % (version, pixmap_format, bits_per_pixel))
+    n = bits_per_pixel // 8
     start = header_size + ncolors * 12
     pixels = data[start:start + bytes_per_line * height]
-    if bytes_per_line != width * 4:
-        pixels = b''.join(pixels[y * bytes_per_line:y * bytes_per_line + width * 4]
+    if bytes_per_line != width * n:
+        pixels = b''.join(pixels[y * bytes_per_line:y * bytes_per_line + width * n]
                           for y in range(height))
-    r, g, b = (2, 1, 0) if byte_order == 0 else (1, 2, 3)  # BGRX or XRGB in memory
+    # each colour's byte in a pixel, from its mask: BGR(X) or (X)RGB in memory
+    r, g, b = ((m.bit_length() - 8) // 8 if byte_order == 0 else n - 1 - (m.bit_length() - 8) // 8
+               for m in masks)
     rgb = bytearray(width * height * 3)
-    rgb[0::3], rgb[1::3], rgb[2::3] = pixels[r::4], pixels[g::4], pixels[b::4]
+    rgb[0::3], rgb[1::3], rgb[2::3] = pixels[r::n], pixels[g::n], pixels[b::n]
     return width, height, bytes(rgb)
 
 
