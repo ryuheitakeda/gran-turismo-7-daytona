@@ -43,8 +43,8 @@ STUCK_SPEED = float(env('STUCK_SPEED', '30'))
 STUCK_TIME = float(env('STUCK_TIME', '5'))
 STUCK_GIVE_UP = float(env('STUCK_GIVE_UP', '60'))  # stuck this long: give up (GT7 puts a stuck car back sooner)
 STUCK_RETRY = float(env('STUCK_RETRY', '20'))  # stuck this long: pause and retry the race (0: never)
-LAUNCH_THROTTLE = float(env('LAUNCH_THROTTLE', '0.5'))  # R2 below LAUNCH_SPEED: full R2 from standstill spins the rear out
-LAUNCH_SPEED = float(env('LAUNCH_SPEED', '120'))  # km/h
+LAUNCH_THROTTLE = float(env('LAUNCH_THROTTLE', '0.5'))  # R2 from standstill: full R2 spins the rear out
+LAUNCH_TIME = float(env('LAUNCH_TIME', '3'))  # seconds from moving off to full R2 (LAUNCH_THROTTLE for the first third)
 RETRY_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.retry')  # touch it: retry the race now
 STRAIGHT_TIME = float(env('STRAIGHT_TIME', '15'))
 MAINTENANCE_RACES = int(env('MAINTENANCE_RACES', '20'))
@@ -115,7 +115,7 @@ class Pilot:
                 os.remove(stale)
         # (before the telemetry thread, whose on_packet reads them)
         self.override_until, self.nitro_on, self.r2_on, self.off_line = 0.0, False, False, False
-        self.r2_level = 0.0
+        self.r2_level, self.moving_since = 0.0, None
         self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
         threading.Thread(target=self.drive, daemon=True).start()
@@ -152,7 +152,13 @@ class Pilot:
             if not t['on_track'] or t['paused'] or t['laps'] <= 0:
                 return
             if self.r2_on:
-                level = 1.0 if t['speed'] >= LAUNCH_SPEED else LAUNCH_THROTTLE
+                now = time.time()
+                if t['speed'] < 5:
+                    self.moving_since, level = None, LAUNCH_THROTTLE  # standing: launch again
+                else:
+                    self.moving_since = self.moving_since or now
+                    ramp = min(1.0, max(0.0, (now - self.moving_since) / LAUNCH_TIME * 1.5 - 0.5))
+                    level = round(LAUNCH_THROTTLE + (1.0 - LAUNCH_THROTTLE) * ramp, 2)
                 if level != self.r2_level:
                     self.r2_level = level
                     self.pad.r2(level)
@@ -274,12 +280,15 @@ class Pilot:
 
     def throttle(self, on):
         """Hold R2 down, or let it go. The pad only sends changes, and GT7 drops the one
-        sent while a race loads, so drive() keeps nudging it while it is down. Below
-        LAUNCH_SPEED it is held at LAUNCH_THROTTLE (on_packet raises it): with traction
-        control 3, full R2 from the grid spun the rear wheels, the car turned right on the
-        banking and stuck nose-first in the wall, three starts in a row (2026-10-30 02:12)."""
+        sent while a race loads, so drive() keeps nudging it while it is down. From
+        standstill it starts at LAUNCH_THROTTLE and on_packet takes it to full over
+        LAUNCH_TIME: with traction control 3, full R2 from the grid spun the rear wheels,
+        the car turned right on the banking and stuck nose-first in the wall, three starts
+        in a row (2026-10-30 02:12). (Held at half until 120 km/h, the gearbox stayed in
+        first and the car crawled at 60 km/h, 02:28.)"""
         self.r2_on = on
         self.r2_level = LAUNCH_THROTTLE if on else 0.0
+        self.moving_since = None
         self.pad.r2(self.r2_level)
 
     def drive(self):
