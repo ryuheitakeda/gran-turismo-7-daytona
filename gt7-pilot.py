@@ -136,13 +136,16 @@ class Pilot:
         lap = self.lap_log
         if t['lap'] != lap.get('lap'):
             if lap.get('n', 0) >= 600 and 1 <= lap['lap'] <= t['laps']:  # a whole lap, not the start
-                log('  Lap %d drive: d %.2f m (%.2f..%.2f), heading %.1f deg, stick %.3f (%s)' % (
-                    lap['lap'], lap['d'] / lap['n'], lap['dmin'], lap['dmax'],
+                log('  Lap %d %s max %d km/h, d %.2f m (%.2f..%.2f), heading %.1f deg, stick %.3f (%s)' % (
+                    lap['lap'], lap_time(round(1000 * (t['time'] - lap['start']))), lap['vmax'],
+                    lap['d'] / lap['n'], lap['dmin'], lap['dmax'],
                     math.degrees(lap['psi'] / lap['n']), lap['stick'] / lap['n'],
                     'taps' if self.taps else DRIVE))
             lap.clear()
-            lap.update(lap=t['lap'], n=0, d=0.0, psi=0.0, stick=0.0, dmin=99.0, dmax=-99.0)
+            lap.update(lap=t['lap'], n=0, d=0.0, psi=0.0, stick=0.0, dmin=99.0, dmax=-99.0,
+                       start=t['time'], vmax=0.0)
         lap['n'] += 1
+        lap['vmax'] = max(lap['vmax'], t['speed'])
         lap['d'] += self.line.d
         lap['psi'] += self.line.psi
         lap['stick'] += stick
