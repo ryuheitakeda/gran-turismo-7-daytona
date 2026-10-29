@@ -113,8 +113,8 @@ class Pilot:
                 os.remove(stale)
         self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
+        self.override_until, self.nitro_on, self.r2_on = 0.0, False, False
         threading.Thread(target=self.drive, daemon=True).start()
-        self.override_until, self.nitro_on = 0.0, False
         if TRAFFIC != 'off' and WINDOW_ID:
             threading.Thread(target=self.watch_traffic, daemon=True).start()
 
@@ -254,10 +254,22 @@ class Pilot:
         self.probe_seen.append((stick, -math.degrees(t['steer'])))  # the recordings show right as negative
         return True
 
+    def throttle(self, on):
+        """Hold R2 down, or let it go. The pad only sends changes, and GT7 drops the one
+        sent while a race loads, so drive() keeps nudging it while it is down."""
+        self.r2_on = on
+        self.pad.r2(1.0 if on else 0.0)
+
     def drive(self):
-        """Steer like the key taps: the left stick fully right briefly, again and again."""
+        """Steer like the key taps: the left stick fully right briefly, again and again,
+        and nudge R2 once a second while it is held (98%, then 100% again)."""
+        nudged = 0.0
         try:
             while self.running:
+                if self.r2_on and time.time() - nudged >= 1.0:
+                    nudged = time.time()
+                    self.pad.r2(0.98)
+                    self.pad.r2(1.0)
                 if self.steering and self.taps:
                     self.pad.stick(1.0)
                     time.sleep(TAP_LENGTH)
@@ -321,7 +333,7 @@ class Pilot:
     def retry_race(self):
         """Pause the race and pick Retry; it restarts at the grid. True when the race shows again."""
         self.steering = False
-        self.pad.r2(0)
+        self.throttle(False)
         self.pad.stick(0.0)
         log('  Retrying the race from the pause menu')
         refs, window = screen.references(), int(WINDOW_ID)
@@ -404,12 +416,12 @@ class Pilot:
         """The presses after the race on a timer, for when the screens aren't learned."""
         if result:
             # telemetry saw the car cross the line, so no buffer for a late finish is needed
-            self.pad.r2(0)
+            self.throttle(False)
             self.pause(FINISH_WAIT)
             log('Standings')
         else:
             self.pause(30)
-            self.pad.r2(0)
+            self.throttle(False)
             log('Standings')
             self.pause(20)  # extra wait here to buffer for slow finishes
         self.press('cross', 'standings')
@@ -477,7 +489,7 @@ class Pilot:
                     self.pause(2)
                 self.press('cross', 'start')
             self.pause(2)
-            self.pad.r2(1)  # hold only during the race, never in the menus
+            self.throttle(True)  # hold only during the race, never in the menus
             self.pause(6)
 
             deadline = time.time() + START_TIMEOUT - 8
@@ -565,7 +577,7 @@ class Pilot:
             reward = None
             if result and MENUS == 'screen':
                 # look at the screen before each press: skip "1st", then through the results
-                self.pad.r2(0)
+                self.throttle(False)
                 self.reward_presses, self.balance_after = 0, None
                 refs, window = screen.references(), int(WINDOW_ID)
                 if not menus.to_start(self.menu_press, lambda: self.look(window, refs), log,
