@@ -49,6 +49,7 @@ STEER_KD = float(env('STEER_KD', '0.1'))  # line: stick per metre off the aim
 STEER_KPSI = float(env('STEER_KPSI', '1.0'))  # line: stick per radian of heading towards the wall
 STEER_MAX = float(env('STEER_MAX', '0.3'))  # line: the most stick either way
 MENU_TRACE = env('MENU_TRACE', '') == '1'  # log every press on the screens after the race
+TAPS_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.taps')  # touch it: back to taps
 LOST = 8.0  # line: metres off the line at which it gives up and taps for the rest of the race
 
 
@@ -83,6 +84,8 @@ class Pilot:
             except (OSError, ValueError, KeyError) as e:
                 log('WARNING: no track line (%s); steering with taps' % e)
                 self.taps = True
+        if os.path.exists(TAPS_FILE):
+            os.remove(TAPS_FILE)
         self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
         threading.Thread(target=self.drive, daemon=True).start()
@@ -113,6 +116,14 @@ class Pilot:
     def on_packet(self, t):
         """Every packet: the line driver's stick, applied with DRIVE=line, and a log
         line per lap of how far the car was from the line and how it steered."""
+        try:
+            self.steer_by_line(t)
+        except Exception as e:  # never let it stop the telemetry
+            if not self.taps:
+                self.taps = True
+                log('WARNING: steering by the line failed (%r); steering with taps' % e)
+
+    def steer_by_line(self, t):
         if not self.line or not t['on_track'] or t['paused'] or t['laps'] <= 0:
             return
         stick = self.line.update(t)
@@ -131,7 +142,10 @@ class Pilot:
         lap['stick'] += stick
         lap['dmin'], lap['dmax'] = min(lap['dmin'], self.line.d), max(lap['dmax'], self.line.d)
         if DRIVE == 'line' and self.steering and not self.taps:
-            if abs(self.line.d) > LOST:
+            if t['packet_id'] % 30 == 0 and os.path.exists(TAPS_FILE):
+                self.taps = True
+                log('  Steering with taps from now on, as asked (%s)' % TAPS_FILE)
+            elif abs(self.line.d) > LOST:
                 self.taps = True
                 log('WARNING: %.1f m off the track line; steering with taps for the rest of the race' % self.line.d)
             else:
