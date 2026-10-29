@@ -6,19 +6,23 @@
 
 # Analyse a telemetry recording made with TELEMETRY_RECORD
 # Usage: uv run gt7-analyze.py <file.gt7tel> [output-dir]
+#        uv run gt7-analyze.py track <file.gt7tel> [lap]
 #
 # Prints a table per race and lap, and saves charts in output-dir (default
 # <file>-analysis): the line driven coloured by speed, the speed over the lap
-# distance, and the steering angle with the speed over 20 seconds.
-# "Scrape" is the share of the lap at full throttle while losing speed, a
-# rough sign of rubbing the wall.
+# distance, and the steering angle with the speed over 20 seconds. With a
+# track line (below), it also shows how far each lap ran from it (d, metres,
+# + towards the outside wall).
+# track saves the line of one lap (default: the fastest of laps 2 on of the
+# first race) as the track line for DRIVE=line (gt7/driver.py).
 
+import json
 import math
 import os
 import struct
 import sys
 
-from gt7 import telemetry
+from gt7 import driver, telemetry
 
 
 def read(path):
@@ -61,19 +65,18 @@ def fmt(ms):
     return '%d:%06.3f' % (ms // 60000, ms % 60000 / 1000) if ms else '-'
 
 
-def lap_stats(samples):
+def lap_stats(samples, track=None):
     speeds = [s['speed'] for s in samples]
     steer = [abs(math.degrees(s['steer'])) for s in samples if s['steer'] is not None]
-    scrape = 0
-    for a, b in zip(samples, samples[6:]):  # ~0.1 s apart
-        if a['throttle'] >= 250 and b['time'] > a['time'] and \
-                (b['speed'] - a['speed']) / (b['time'] - a['time']) < -3:
-            scrape += 1
+    d = []
+    if track:
+        line = driver.LineDriver(track)
+        d = [(line.update(s), line.d)[1] for s in samples]
     return {
-        'max': max(speeds), 'mean': sum(speeds) / len(speeds),
+        'max': max(speeds), 'mean': sum(speeds) / len(speeds), 'min': min(speeds),
         'steer': sum(steer) / len(steer) if steer else None,
         'steering': 100 * sum(1 for a in steer if a > 1) / len(steer) if steer else None,
-        'scrape': 100 * scrape / max(1, len(samples) - 6),
+        'd': (sum(d) / len(d), min(d), max(d)) if d else None,
     }
 
 
@@ -129,12 +132,7 @@ def charts(race, n, out):
         plt.close(fig)
 
 
-def main():
-    if len(sys.argv) < 2:
-        sys.exit('Usage: uv run gt7-analyze.py <file.gt7tel> [output-dir]')
-    path = sys.argv[1]
-    out = sys.argv[2] if len(sys.argv) > 2 else os.path.splitext(path)[0] + '-analysis'
-    os.makedirs(out, exist_ok=True)
+def samples_of(path):
     samples, sizes = [], {}
     counter = telemetry.Counter()
     for when, packet in read(path):
@@ -143,6 +141,34 @@ def main():
         samples.append(s)
         counter.add(s['packet_id'])
         sizes[len(packet)] = sizes.get(len(packet), 0) + 1
+    return samples, sizes, counter
+
+
+def make_track(path, lap=None):
+    race = split_races(samples_of(path)[0])[0]
+    driven = [s for s in race if s['lap'] <= s['laps'] and s['on_track'] and not s['paused']]
+    if lap is None:
+        times = lap_times(race)
+        lap = min((t, n) for n, t in times.items() if n >= 2)[1]
+    data = driver.build([s for s in driven if s['lap'] == lap])
+    os.makedirs(os.path.dirname(driver.TRACK), exist_ok=True)
+    with open(driver.TRACK, 'w') as f:
+        json.dump(data, f)
+    print('Saved the line of lap %d (%d points, %.0f m) to %s' % (
+        lap, len(data['points']), len(data['points']) * driver.SPACING, driver.TRACK))
+
+
+def main():
+    if len(sys.argv) < 2:
+        sys.exit('Usage: uv run gt7-analyze.py <file.gt7tel> [output-dir] | track <file.gt7tel> [lap]')
+    if sys.argv[1] == 'track':
+        make_track(sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else None)
+        return
+    path = sys.argv[1]
+    out = sys.argv[2] if len(sys.argv) > 2 else os.path.splitext(path)[0] + '-analysis'
+    os.makedirs(out, exist_ok=True)
+    track = driver.Track.load() if os.path.exists(driver.TRACK) else None
+    samples, sizes, counter = samples_of(path)
     total = counter.packets + counter.missing
     print('%s: %d packets %s, %d missing (%.2f%%)' % (
         path, counter.packets, sizes, counter.missing, 100 * counter.missing / total if total else 0))
@@ -153,14 +179,15 @@ def main():
         print('\nRace %d: %s, %d laps%s, best %s' % (
             n, __import__('datetime').datetime.fromtimestamp(race[0]['time']).strftime('%Y-%m-%d %H:%M:%S'),
             laps, '' if finished else ' (not finished)', fmt(race[-1]['best'])))
-        print('lap  time       max km/h  mean km/h  steer deg  steering %  scrape %')
+        print('lap  time       min/mean/max km/h  steer deg  steering %%%s' % ('  d mean (min..max) m' if track else ''))
         driven = [s for s in race if s['lap'] <= laps and s['on_track'] and not s['paused']]
         for lap in sorted({s['lap'] for s in driven}):
-            st = lap_stats([s for s in driven if s['lap'] == lap])
-            print('%3d  %-9s  %8.0f  %9.1f  %9s  %10s  %8.1f' % (
-                lap, fmt(times.get(lap)), st['max'], st['mean'],
+            st = lap_stats([s for s in driven if s['lap'] == lap], track)
+            print('%3d  %-9s  %4.0f/%5.1f/%4.0f    %9s  %10s%s' % (
+                lap, fmt(times.get(lap)), st['min'], st['mean'], st['max'],
                 '-' if st['steer'] is None else '%.2f' % st['steer'],
-                '-' if st['steering'] is None else '%.0f' % st['steering'], st['scrape']))
+                '-' if st['steering'] is None else '%.0f' % st['steering'],
+                '  %6.2f (%5.2f..%5.2f)' % st['d'] if st['d'] else ''))
         charts(race, n, out)
     print('\nCharts in %s' % out)
 

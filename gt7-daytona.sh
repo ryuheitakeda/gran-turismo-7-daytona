@@ -31,6 +31,7 @@ LAPS=${LAPS:-10}
 LOCK_FILE=${LOCK_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.lock}
 LOG_FILE=${LOG_FILE:-$HOME/gt7-daytona.log}
 STOP_FILE=${STOP_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.stop-after-race}
+DRIVE=${DRIVE:-pwm} # with PILOT=1: pwm (taps), shadow (taps, and log what line would do), line (steer by the track line)
 MAINTENANCE_RACES=${MAINTENANCE_RACES:-20} # remind to check the engine every N races, 0 to turn off
 MENUS=${MENUS:-auto} # after the race: screen (look before each press), timer, or auto (screen once learned)
 PAD=${PAD:-uinput} # with PILOT=1: uinput for the virtual gamepad, dry to only log it (tests)
@@ -45,9 +46,13 @@ START_TIMEOUT=${START_TIMEOUT:-15} # with telemetry, quit if the car isn't on tr
 STUCK_SPEED=${STUCK_SPEED:-30} # with telemetry, km/h below which the car counts as stuck
 STUCK_TIME=${STUCK_TIME:-5} # with telemetry, quit after being stuck this many seconds
 STRAIGHT_TIME=${STRAIGHT_TIME:-15} # seconds to drive straight after the start to avoid hitting cars ahead
+STEER_KD=${STEER_KD:-0.1} # with DRIVE=line, stick per metre off the aim
+STEER_KPSI=${STEER_KPSI:-1.0} # with DRIVE=line, stick per radian of heading towards the wall
+STEER_MAX=${STEER_MAX:-0.3} # with DRIVE=line, the most stick either way (1 is full lock)
 TAP_INTERVAL=${TAP_INTERVAL:-0.58} # with PILOT=1, seconds from one steering tap to the next
 TAP_LENGTH=${TAP_LENGTH:-0.053} # with PILOT=1, seconds each steering tap lasts (the key taps measured on :0)
 TELEMETRY_RECORD=${TELEMETRY_RECORD:-} # with telemetry, directory to record every packet in (gt7-analyze.py), empty for none
+WALL_GAP=${WALL_GAP:-0.3} # with DRIVE=line, metres inside the wall line (gt7-analyze.py track) to aim for
 WINDOW_NAME=${WINDOW_NAME:-'^Chiaki \| Stream$'} # xdotool regex, case-insensitive
 
 # ---------- key config ----------
@@ -295,7 +300,7 @@ if [ "$PILOT" = 1 ]; then
   TELEMETRY_FILE=${XDG_RUNTIME_DIR:-/tmp}/gt7-telemetry.state # read by gt7-web.py
   export PLAYSTATION_IP TELEMETRY_FILE TELEMETRY_RECORD SCREEN_DIR WINDOW_ID WINDOW_NAME STOP_FILE PAD MENUS \
     KEYPRESS_LENGTH FINISH_WAIT RACE_PRIZE RACE_TIME START_TIMEOUT STUCK_SPEED STUCK_TIME STRAIGHT_TIME \
-    MAINTENANCE_RACES LAPS LAP_MILES TAP_LENGTH TAP_INTERVAL
+    MAINTENANCE_RACES LAPS LAP_MILES TAP_LENGTH TAP_INTERVAL DRIVE WALL_GAP STEER_KD STEER_KPSI STEER_MAX
   "$(dirname "$0")/gt7-pilot.py" 9>&- &
   status=0
   wait $! || status=$?

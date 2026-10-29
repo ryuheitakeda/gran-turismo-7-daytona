@@ -9,6 +9,7 @@
 # loop. PAD=dry logs the pad instead of making one (for tests).
 
 import datetime
+import math
 import os
 import signal
 import subprocess
@@ -16,7 +17,7 @@ import sys
 import threading
 import time
 
-from gt7 import menus, pad, screen, telemetry
+from gt7 import driver, menus, pad, screen, telemetry
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 env = os.environ.get
@@ -42,6 +43,12 @@ LAP_MILES = float(env('LAP_MILES', '2.6'))
 TAP_LENGTH = float(env('TAP_LENGTH', '0.053'))  # the key taps measured on :0
 TAP_INTERVAL = float(env('TAP_INTERVAL', '0.58'))
 MENUS = env('MENUS', 'timer')  # screen: look at the screen before each press after the race
+DRIVE = env('DRIVE', 'pwm')  # pwm: key-like taps; shadow: taps, and log what line would do; line: steer by the line
+WALL_GAP = float(env('WALL_GAP', '0.3'))  # line: metres inside the wall line to aim for
+STEER_KD = float(env('STEER_KD', '0.1'))  # line: stick per metre off the aim
+STEER_KPSI = float(env('STEER_KPSI', '1.0'))  # line: stick per radian of heading towards the wall
+STEER_MAX = float(env('STEER_MAX', '0.3'))  # line: the most stick either way
+LOST = 8.0  # line: metres off the line at which it gives up and taps for the rest of the race
 
 
 def log(text):
@@ -68,7 +75,14 @@ class Pilot:
         self.snaps = []
         self.snapper = None
         self.pad = pad.DryPad() if env('PAD') == 'dry' else pad.Pad()
-        self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD)
+        self.line, self.taps, self.lap_log = None, DRIVE != 'line', {}
+        if DRIVE in ('shadow', 'line'):
+            try:
+                self.line = driver.LineDriver(driver.Track.load(), WALL_GAP, STEER_KD, STEER_KPSI, STEER_MAX)
+            except (OSError, ValueError, KeyError) as e:
+                log('WARNING: no track line (%s); steering with taps' % e)
+                self.taps = True
+        self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
         threading.Thread(target=self.drive, daemon=True).start()
 
@@ -95,11 +109,38 @@ class Pilot:
                 return
             time.sleep(min(left, 0.1))
 
+    def on_packet(self, t):
+        """Every packet: the line driver's stick, applied with DRIVE=line, and a log
+        line per lap of how far the car was from the line and how it steered."""
+        if not self.line or not t['on_track'] or t['paused'] or t['laps'] <= 0:
+            return
+        stick = self.line.update(t)
+        lap = self.lap_log
+        if t['lap'] != lap.get('lap'):
+            if lap.get('n') and 1 <= lap['lap'] <= t['laps']:
+                log('  Lap %d drive: d %.2f m (%.2f..%.2f), heading %.1f deg, stick %.3f (%s)' % (
+                    lap['lap'], lap['d'] / lap['n'], lap['dmin'], lap['dmax'],
+                    math.degrees(lap['psi'] / lap['n']), lap['stick'] / lap['n'],
+                    'taps' if self.taps else DRIVE))
+            lap.clear()
+            lap.update(lap=t['lap'], n=0, d=0.0, psi=0.0, stick=0.0, dmin=99.0, dmax=-99.0)
+        lap['n'] += 1
+        lap['d'] += self.line.d
+        lap['psi'] += self.line.psi
+        lap['stick'] += stick
+        lap['dmin'], lap['dmax'] = min(lap['dmin'], self.line.d), max(lap['dmax'], self.line.d)
+        if DRIVE == 'line' and self.steering and not self.taps:
+            if abs(self.line.d) > LOST:
+                self.taps = True
+                log('WARNING: %.1f m off the track line; steering with taps for the rest of the race' % self.line.d)
+            else:
+                self.pad.stick(stick)
+
     def drive(self):
         """Steer like the key taps: the left stick fully right briefly, again and again."""
         try:
             while self.running:
-                if self.steering:
+                if self.steering and self.taps:
                     self.pad.stick(1.0)
                     time.sleep(TAP_LENGTH)
                     self.pad.stick(0.0)
@@ -254,6 +295,7 @@ class Pilot:
                 log('  Race start (Race ending at %s)'
                     % (datetime.datetime.now() + datetime.timedelta(seconds=RACE_TIME)).strftime('%H:%M:%S'))
             self.snap_every(30, 'race')
+            self.taps = DRIVE != 'line' or not self.line
             started = time.time()
             steer_start, race_end = started + STRAIGHT_TIME, started + RACE_TIME
             slow_since, checked, result = None, started, ''
