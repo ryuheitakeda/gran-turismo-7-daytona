@@ -342,19 +342,20 @@ class Pilot:
                 self.keep_shot('reward', self.last_image)
 
     def read_balance(self, image):
-        """The balance on the rewards screen, or None. Its digits are white, or pink for a
-        moment after they change, and the usual threshold reads pink ones as thin strokes
-        ('8' for 807,283,200 on 2026-10-30). A lower one reads pink but merges white digits
-        (5 as 9), so it is tried only when the usual reading comes out cut short, and kept
-        only when it fits the balance before the race."""
+        """The balance on the rewards screen, or None. Its digits are white, or pink or red
+        for a moment after they change, and the usual reading loses pink and red strokes
+        ('8' for 807,283,200, nothing for 828,583,200 on 2026-10-30). Reading by the red
+        channel gets those but now and then merges white digits (5 as 9), so it is tried
+        only when the usual reading comes out cut short, and kept only when it fits the
+        balance before the race (when that is known)."""
         before = self.balance_before
         value = screen.read_number(image, screen.REWARD_BALANCE, bright=150)
         if value is not None and value >= 1000000 and (not before or len(str(value)) >= len(str(before))):
             return value
-        if before:
-            value = screen.read_number(image, screen.REWARD_BALANCE, bright=120)
-            if value is not None and 0 < value - before <= 1.2 * RACE_PRIZE:
-                return value
+        value = screen.read_number(image, screen.REWARD_BALANCE, colour=True)
+        if value is not None and value >= 1000000 and (
+                not before or 0 < value - before <= 1.2 * RACE_PRIZE):
+            return value
         return None
 
     def retry_race(self):

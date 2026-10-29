@@ -227,17 +227,23 @@ TOP_CREDITS = (352, 24, 115, 24)
 REWARD_BALANCE = (950, 278, 200, 38)
 
 
-def read_number(image, region, bright=150, scale=3):
+def read_number(image, region, bright=150, scale=3, colour=False):
     """The number in a region of white digits, read by tesseract (tesseract-ocr), or
-    None without tesseract or when nothing like a number is there."""
+    None without tesseract or when nothing like a number is there. With colour, the
+    digits may be white, pink or red: read the red channel, cut at 0.6 of the
+    brightest red there."""
     width, height, rgb = image
     x0, y0, w, h = region
+    rows = [rgb[(y * width + x0) * 3:(y * width + x0 + w) * 3] for y in range(y0, y0 + h)]
+    if colour:
+        reds = sorted(v for row in rows for v in row[0::3])
+        cut = 0.6 * reds[int(len(reds) * 0.995)]
     out = bytearray()
-    for y in range(y0, y0 + h):
-        row = rgb[(y * width + x0) * 3:(y * width + x0 + w) * 3]
+    for row in rows:
         line = bytearray()
         for r, g, b in zip(row[0::3], row[1::3], row[2::3]):
-            line += bytes([0 if (r * 299 + g * 587 + b * 114) // 1000 > bright else 255]) * scale
+            ink = r > cut if colour else (r * 299 + g * 587 + b * 114) // 1000 > bright
+            line += bytes([0 if ink else 255]) * scale
         out += bytes(line) * scale
     pgm = b'P5 %d %d 255\n' % (w * scale, h * scale) + bytes(out)
     try:
