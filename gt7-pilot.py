@@ -316,6 +316,17 @@ class Pilot:
         else:
             self.pad.press(button, DPAD_LENGTH if button in pad.DPAD else KEYPRESS_LENGTH)
 
+    def top_credits(self, window):
+        """The credits in the start screen's top bar, when two reads a second apart agree."""
+        values = []
+        for _ in range(3):
+            self.pause(1.0)
+            values.append(screen.read_number(screen.capture(window), screen.TOP_CREDITS))
+            if len(values) >= 2 and values[-1] is not None and values[-1] == values[-2]:
+                return values[-1]
+        log('  WARNING: the credits in the top bar read %s; no reward for this race' % values)
+        return None
+
     def look(self, window, refs):
         self.last_image = screen.capture(window)
         return screen.classify(self.last_image, refs)[0]
@@ -473,8 +484,9 @@ class Pilot:
                     self.error_shot()
                 if reached == 'start/start':
                     # the credits before the race, to tell the reward from the balance after it: the
-                    # last rewards screen's balance (big digits) or, first, the top bar's (small, misread more)
-                    self.balance_before = self.balance_after or screen.read_number(self.last_image, screen.TOP_CREDITS)
+                    # last rewards screen's balance (big digits) or, first, the top bar's (small; read
+                    # twice a second apart, since its digits roll for a moment after a race)
+                    self.balance_before = self.balance_after or self.top_credits(window)
                     self.press('cross', 'start')
                 elif reached == 'race':
                     log('  The race is already running (restarted, or started by the X that woke the menu)')
