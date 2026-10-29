@@ -33,8 +33,9 @@ def to_start(press, look, log=lambda text: None, timeout=150, pause=time.sleep):
     the cursor on Start. press(button) presses 'cross', 'circle', 'left' or
     'right'; look() returns gt7.screen.classify's name for the screen now.
     Logs each step the first time it shows. Nothing is pressed on a screen it
-    doesn't know. Returns True at the start screen, False when it isn't
-    reached in time."""
+    doesn't know. Returns 'start/start', or 'race' when the race has started
+    (an X that should only bring back the start screen's hidden menu can start
+    it), or None when neither shows in time."""
     deadline = time.time() + timeout
     seen = set()
     last, since = None, time.time()
@@ -42,8 +43,8 @@ def to_start(press, look, log=lambda text: None, timeout=150, pause=time.sleep):
         name = look()
         if name != last:
             last, since = name, time.time()
-        if name == 'start/start':
-            return True
+        if name in ('start/start', 'race'):
+            return name
         step = STEPS.get(name)
         if step and step not in seen:
             seen.add(step)
@@ -53,4 +54,4 @@ def to_start(press, look, log=lambda text: None, timeout=150, pause=time.sleep):
             pause(1.0)  # the screen changes about half a second after a press
         else:
             pause(0.5)  # a fade, the cars after the finish or something new: wait
-    return False
+    return None

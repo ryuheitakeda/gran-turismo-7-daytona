@@ -337,21 +337,27 @@ do
 
   log "Race $race_count"
   if [ "$MENUS" = screen ]; then
-    # press Start only on the start screen with the cursor on it (X brings back
-    # its menu when it has hidden after a while without input)
-    if ! "$(dirname "$0")/gt7-screen.py" to-start --id "$WINDOW_ID" --timeout 30 \
-         --keys "$KEY_X,$KEY_O,$DPAD_L,$DPAD_R" 9>&-; then
-      log 'ERROR: not on the start screen'
-      exit 1
+    # press Start only on the start screen with the cursor on it. When its menu
+    # has hidden after a while without input, the X that brings it back can
+    # also start the race
+    on_screen=0
+    "$(dirname "$0")/gt7-screen.py" to-start --id "$WINDOW_ID" --timeout 30 \
+      --keys "$KEY_X,$KEY_O,$DPAD_L,$DPAD_R" 9>&- || on_screen=$?
+    case $on_screen in
+      0) press $KEY_X start ;;
+      3) log '  The race started on the X that brought back the start menu' ;;
+      *) log 'ERROR: not on the start screen'; exit 1 ;;
+    esac
+  else
+    if [ $race_count -eq 1 ]; then
+      # the start screen hides its menu after a while without input, and the
+      # first X only brings it back; if the menu was showing, this X starts the
+      # race and the next one lands on the loading screen
+      press $KEY_X start-wake
+      pause 2
     fi
-  elif [ $race_count -eq 1 ]; then
-    # the start screen hides its menu after a while without input, and the
-    # first X only brings it back; if the menu was showing, this X starts the
-    # race and the next one lands on the loading screen
-    press $KEY_X start-wake
-    pause 2
+    press $KEY_X start
   fi
-  press $KEY_X start
   pause 2
   hold $KEY_R2 # hold only during the race, never in the menus
   pause 6
@@ -411,9 +417,12 @@ do
   current_money=$((current_money + RACE_PRIZE))
   if [ -n "$result" ] && [ "$MENUS" = screen ]; then
     # look at the screen before each press: skip "1st", then through the results
+    # (if the next race has started on the way, the start below finds it running)
     release $KEY_R2
-    if ! "$(dirname "$0")/gt7-screen.py" to-start --id "$WINDOW_ID" \
-         --keys "$KEY_X,$KEY_O,$DPAD_L,$DPAD_R" 9>&-; then
+    on_screen=0
+    "$(dirname "$0")/gt7-screen.py" to-start --id "$WINDOW_ID" \
+      --keys "$KEY_X,$KEY_O,$DPAD_L,$DPAD_R" 9>&- || on_screen=$?
+    if [ $on_screen -ne 0 ] && [ $on_screen -ne 3 ]; then
       log 'ERROR: the screens after the race did not lead back to the start screen'
       exit 1
     fi

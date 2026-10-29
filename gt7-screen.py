@@ -13,8 +13,9 @@
 #   classify prints the screen each picture (or the window now) shows.
 #   wait exits 0 when one of the screens shows, 1 after the seconds.
 #   to-start presses through the screens after a race (with xdotool, Chiaki's default
-#   keys unless --keys) until the start screen shows: exit 0 there, 1 if it doesn't
-#   get there, 2 (or with --check, 0) depending on whether the references it needs
+#   keys unless --keys) until the start screen shows: exit 0 there, 3 when the race has
+#   started instead (an X meant to bring back the hidden start menu can start it), 1 if
+#   neither shows, 2 (or with --check, 0) depending on whether the references it needs
 #   have been learned. It presses nothing on a screen it doesn't know.
 #   Without --id the window is found by WINDOW_NAME (default '^Chiaki \| Stream$').
 
@@ -106,9 +107,9 @@ def main():
 
         def log(text):
             print(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S ') + text, flush=True)
-        if not menus.to_start(press, lambda: screen.classify(screen.capture(win), refs)[0], log,
-                              args.timeout):
-            sys.exit(1)
+        reached = menus.to_start(press, lambda: screen.classify(screen.capture(win), refs)[0], log,
+                                 args.timeout)
+        sys.exit({'start/start': 0, 'race': 3}.get(reached, 1))
     else:
         parser.print_usage(sys.stderr)
         sys.exit(2)
