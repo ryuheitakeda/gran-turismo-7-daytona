@@ -32,6 +32,8 @@ LOCK_FILE=${LOCK_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.lock}
 LOG_FILE=${LOG_FILE:-$HOME/gt7-daytona.log}
 STOP_FILE=${STOP_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.stop-after-race}
 MAINTENANCE_RACES=${MAINTENANCE_RACES:-20} # remind to check the engine every N races, 0 to turn off
+PAD=${PAD:-uinput} # with PILOT=1: uinput for the virtual gamepad, dry to only log it (tests)
+PILOT=${PILOT:-0} # 1: race with gt7-pilot.py and the virtual gamepad instead of the loop below
 PLAYSTATION_IP=${PLAYSTATION_IP:-} # set to read GT7 telemetry: detect the start, the finish and a stuck car
 QUICKPRESS_LENGTH=${QUICKPRESS_LENGTH:-0.01}
 FINISH_WAIT=${FINISH_WAIT:-8} # with telemetry, seconds from the finish line to the first X
@@ -42,6 +44,8 @@ START_TIMEOUT=${START_TIMEOUT:-15} # with telemetry, quit if the car isn't on tr
 STUCK_SPEED=${STUCK_SPEED:-30} # with telemetry, km/h below which the car counts as stuck
 STUCK_TIME=${STUCK_TIME:-5} # with telemetry, quit after being stuck this many seconds
 STRAIGHT_TIME=${STRAIGHT_TIME:-15} # seconds to drive straight after the start to avoid hitting cars ahead
+TAP_INTERVAL=${TAP_INTERVAL:-0.58} # with PILOT=1, seconds from one steering tap to the next
+TAP_LENGTH=${TAP_LENGTH:-0.053} # with PILOT=1, seconds each steering tap lasts (the key taps measured on :0)
 TELEMETRY_RECORD=${TELEMETRY_RECORD:-} # with telemetry, directory to record every packet in (gt7-analyze.py), empty for none
 WINDOW_NAME=${WINDOW_NAME:-'^Chiaki \| Stream$'} # xdotool regex, case-insensitive
 
@@ -261,6 +265,22 @@ if [ -n "$SCREEN_RECORD" ]; then
   SCREEN_DIR=$SCREEN_RECORD/$(date +%Y%m%d-%H%M%S)
   mkdir -p "$SCREEN_DIR"
   log "Screenshots to $SCREEN_DIR"
+fi
+
+if [ "$PILOT" = 1 ]; then
+  # the same race loop in python, with the virtual gamepad; it reads the telemetry itself
+  if [ -z "$PLAYSTATION_IP" ]; then
+    log 'ERROR: PILOT=1 needs PLAYSTATION_IP'
+    exit 1
+  fi
+  TELEMETRY_FILE=${XDG_RUNTIME_DIR:-/tmp}/gt7-telemetry.state # read by gt7-web.py
+  export PLAYSTATION_IP TELEMETRY_FILE TELEMETRY_RECORD SCREEN_DIR WINDOW_ID WINDOW_NAME STOP_FILE PAD \
+    KEYPRESS_LENGTH FINISH_WAIT RACE_PRIZE RACE_TIME START_TIMEOUT STUCK_SPEED STUCK_TIME STRAIGHT_TIME \
+    MAINTENANCE_RACES LAPS LAP_MILES TAP_LENGTH TAP_INTERVAL
+  "$(dirname "$0")/gt7-pilot.py" 9>&- &
+  status=0
+  wait $! || status=$?
+  exit $status
 fi
 
 if [ -n "$PLAYSTATION_IP" ]; then

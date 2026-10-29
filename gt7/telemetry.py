@@ -124,70 +124,93 @@ class Counter:
         self.packets = self.missing = 0
 
 
+class Receiver:
+    """Receive GT7 telemetry until keep_going() turns false: keep the latest
+    fields in .latest, write the state file, record every packet and log the
+    packets received and missing at each finish. on_packet(fields) is called
+    for every packet (~60 a second)."""
+
+    def __init__(self, host, state_path=None, record_dir='', on_packet=None):
+        self.host, self.state_path, self.record_dir = host, state_path, record_dir
+        self.on_packet = on_packet
+        self.latest = None
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(('0.0.0.0', RECEIVE_PORT))
+        self.sock.settimeout(0.5)
+
+    def fresh(self, seconds=2):
+        """The latest fields if they are at most this old, else None."""
+        t = self.latest
+        return t if t and time.time() - t['time'] <= seconds else None
+
+    def run(self, keep_going):
+        kind = b'B'
+        b_works = False
+        heartbeats = 0
+        last_heartbeat = last_write = 0
+        finished = False
+        counter = Counter()
+        record = None
+        try:
+            while keep_going():
+                now = time.time()
+                if now - last_heartbeat > HEARTBEAT_INTERVAL:
+                    # until a 'B' packet arrives, alternate with 'A' for a GT7 without it
+                    heartbeats += 1
+                    sent = b'B' if b_works or heartbeats % 2 else b'A'
+                    self.sock.sendto(sent, (self.host, SEND_PORT))
+                    last_heartbeat = now
+                try:
+                    data = self.sock.recv(4096)
+                except socket.timeout:
+                    continue
+                packet = decrypt(data, kind)
+                if packet is None:
+                    continue
+                kind = b'B' if len(packet) >= SIZE_B else b'A'
+                b_works = b_works or kind == b'B'
+                t = parse(packet)
+                t['time'] = now
+                if self.latest is None:
+                    text = '  Telemetry: packet %s (%d bytes)' % (kind.decode(), len(packet))
+                    if self.record_dir:
+                        name = os.path.join(self.record_dir, time.strftime('%Y%m%d-%H%M%S') + '.gt7tel')
+                        try:
+                            os.makedirs(self.record_dir, exist_ok=True)
+                            record = open(name, 'ab')
+                            record.write(RECORD_MAGIC)
+                            text += ', recording to ' + name
+                        except OSError as e:
+                            text += ', WARNING: cannot record (%s)' % e
+                    log(text)
+                self.latest = t
+                counter.add(t['packet_id'])
+                if record:
+                    record.write(struct.pack('<dH', now, len(packet)) + packet)
+                if self.on_packet:
+                    self.on_packet(t)
+                if t['laps'] > 0 and t['lap'] > t['laps']:
+                    if not finished:
+                        counter.report(kind)
+                    finished = True
+                else:
+                    finished = False
+                if self.state_path and now - last_write >= 0.2:
+                    with open(self.state_path + '.tmp', 'w') as f:
+                        f.write(state_line(t, now))
+                    os.replace(self.state_path + '.tmp', self.state_path)
+                    last_write = now
+                    if record:
+                        record.flush()
+        finally:
+            if record:
+                record.close()
+            self.sock.close()
+
+
 def main():
     # Usage: gt7-telemetry.py <playstation-ip> <state-file>; TELEMETRY_RECORD=<dir> records too
     host, path = sys.argv[1], sys.argv[2]
-    record_dir = os.environ.get('TELEMETRY_RECORD', '')
     signal.signal(signal.SIGTERM, lambda *args: sys.exit(0))  # close the recording on kill
     parent = os.getppid()
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('0.0.0.0', RECEIVE_PORT))
-    sock.settimeout(0.5)
-    kind = b'B'
-    b_works = False
-    heartbeats = 0
-    last_heartbeat = last_write = last_packet = 0
-    finished = False
-    counter = Counter()
-    record = None
-    try:
-        while os.getppid() == parent:
-            now = time.time()
-            if now - last_heartbeat > HEARTBEAT_INTERVAL:
-                # until a 'B' packet arrives, alternate with 'A' for a GT7 without it
-                heartbeats += 1
-                sent = b'B' if b_works or heartbeats % 2 else b'A'
-                sock.sendto(sent, (host, SEND_PORT))
-                last_heartbeat = now
-            try:
-                data = sock.recv(4096)
-            except socket.timeout:
-                continue
-            packet = decrypt(data, kind)
-            if packet is None:
-                continue
-            kind = b'B' if len(packet) >= SIZE_B else b'A'
-            b_works = b_works or kind == b'B'
-            t = parse(packet)
-            if not last_packet:
-                text = '  Telemetry: packet %s (%d bytes)' % (kind.decode(), len(packet))
-                if record_dir:
-                    name = os.path.join(record_dir, time.strftime('%Y%m%d-%H%M%S') + '.gt7tel')
-                    try:
-                        os.makedirs(record_dir, exist_ok=True)
-                        record = open(name, 'ab')
-                        record.write(RECORD_MAGIC)
-                        text += ', recording to ' + name
-                    except OSError as e:
-                        text += ', WARNING: cannot record (%s)' % e
-                log(text)
-            last_packet = now
-            counter.add(t['packet_id'])
-            if record:
-                record.write(struct.pack('<dH', now, len(packet)) + packet)
-            if t['laps'] > 0 and t['lap'] > t['laps']:
-                if not finished:
-                    counter.report(kind)
-                finished = True
-            else:
-                finished = False
-            if now - last_write >= 0.2:
-                with open(path + '.tmp', 'w') as f:
-                    f.write(state_line(t, now))
-                os.replace(path + '.tmp', path)
-                last_write = now
-                if record:
-                    record.flush()
-    finally:
-        if record:
-            record.close()
+    Receiver(host, path, os.environ.get('TELEMETRY_RECORD', '')).run(lambda: os.getppid() == parent)
