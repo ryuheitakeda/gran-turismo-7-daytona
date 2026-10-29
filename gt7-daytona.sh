@@ -37,10 +37,12 @@ QUICKPRESS_LENGTH=${QUICKPRESS_LENGTH:-0.01}
 FINISH_WAIT=${FINISH_WAIT:-8} # with telemetry, seconds from the finish line to the first X
 RACE_PRIZE=${RACE_PRIZE:-9705000} # 1st place with clean race bonus
 RACE_TIME=${RACE_TIME:-800} # seconds from "Race start" to crossing the finish line, used without telemetry
+SCREEN_RECORD=${SCREEN_RECORD:-} # directory to keep screenshots of the menus and the race in (needs xwd), empty for none
 START_TIMEOUT=${START_TIMEOUT:-15} # with telemetry, quit if the car isn't on track this many seconds after X
 STUCK_SPEED=${STUCK_SPEED:-30} # with telemetry, km/h below which the car counts as stuck
 STUCK_TIME=${STUCK_TIME:-5} # with telemetry, quit after being stuck this many seconds
 STRAIGHT_TIME=${STRAIGHT_TIME:-15} # seconds to drive straight after the start to avoid hitting cars ahead
+TELEMETRY_RECORD=${TELEMETRY_RECORD:-} # with telemetry, directory to record every packet in (gt7-analyze.py), empty for none
 WINDOW_NAME=${WINDOW_NAME:-'^Chiaki \| Stream$'} # xdotool regex, case-insensitive
 
 # ---------- key config ----------
@@ -93,10 +95,25 @@ release() {
   send keyup "$1"
 }
 
-press() {
+press() { # press <key> [label]: with a label, also save a screenshot (SCREEN_RECORD)
+  [ -z "${2:-}" ] || snap "$2"
   send keydown "$1"
   sleep $KEYPRESS_LENGTH
   send keyup "$1"
+}
+
+snap() { # snap <label>: save a screenshot in the background when SCREEN_RECORD is set
+  [ -n "$SCREEN_DIR" ] || return 0
+  "$(dirname "$0")/gt7-screen.py" snap --id "$WINDOW_ID" \
+    "$SCREEN_DIR/$(date +%H%M%S.%1N)-race$race_count-$1.png" 9>&- >/dev/null 2>&1 &
+}
+
+snap_every() { # snap_every <seconds> <label>: save screenshots until the next snap_every
+  [ -n "$SCREEN_DIR" ] || return 0
+  [ -z "$snapper" ] || kill "$snapper" 2>/dev/null || true
+  "$(dirname "$0")/gt7-screen.py" record --id "$WINDOW_ID" --every "$1" \
+    "$SCREEN_DIR" "race$race_count-$2" 9>&- >/dev/null 2>&1 &
+  snapper=$!
 }
 
 quick_press() {
@@ -194,7 +211,7 @@ esac
 # ---------- dependencies ----------
 
 missing=''
-for cmd in xdotool flock awk; do
+for cmd in xdotool flock awk ${SCREEN_RECORD:+xwd}; do
   if ! command -v $cmd >/dev/null 2>&1; then
     missing="$missing $cmd"
   fi
@@ -231,6 +248,8 @@ if [ -z "$WINDOW_ID" ]; then
 fi
 
 TELEMETRY_FILE=""
+SCREEN_DIR=""
+snapper=""
 trap exit_gracefully EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
@@ -238,9 +257,15 @@ trap 'exit 143' TERM
 
 log "Started: RACE_TIME=$RACE_TIME STRAIGHT_TIME=$STRAIGHT_TIME RACE_PRIZE=$RACE_PRIZE display=$DISPLAY window=$WINDOW_ID"
 
+if [ -n "$SCREEN_RECORD" ]; then
+  SCREEN_DIR=$SCREEN_RECORD/$(date +%Y%m%d-%H%M%S)
+  mkdir -p "$SCREEN_DIR"
+  log "Screenshots to $SCREEN_DIR"
+fi
+
 if [ -n "$PLAYSTATION_IP" ]; then
   TELEMETRY_FILE=${XDG_RUNTIME_DIR:-/tmp}/gt7-telemetry.state # read by gt7-web.py
-  "$(dirname "$0")/gt7-telemetry.py" "$PLAYSTATION_IP" "$TELEMETRY_FILE" 9>&- &
+  TELEMETRY_RECORD=$TELEMETRY_RECORD "$(dirname "$0")/gt7-telemetry.py" "$PLAYSTATION_IP" "$TELEMETRY_FILE" 9>&- &
   for i in $(seq 10); do
     pause 1
     if telemetry; then
@@ -276,10 +301,10 @@ do
     # the start screen hides its menu after a while without input, and the
     # first X only brings it back; if the menu was showing, this X starts the
     # race and the next one lands on the loading screen
-    press $KEY_X
+    press $KEY_X start-wake
     pause 2
   fi
-  press $KEY_X
+  press $KEY_X start
   pause 2
   hold $KEY_R2 # hold only during the race, never in the menus
   pause 6
@@ -298,6 +323,7 @@ do
   else
     log "  Race start (Race ending at $(date -d "+$RACE_TIME seconds" +%T))"
   fi
+  snap_every 30 race
   # time by wall clock: each xdotool call adds overhead, so counting ticks drifts
   steer_start=$((SECONDS + STRAIGHT_TIME))
   race_end=$((SECONDS + RACE_TIME))
@@ -333,6 +359,7 @@ do
   done
 
   log "  Race ending$result"
+  snap_every 1 menu # until the next race starts
   if [ -n "$result" ]; then
     # telemetry saw the car cross the line, so no buffer for a late finish is needed
     release $KEY_R2
@@ -345,36 +372,36 @@ do
     log 'Standings'
     pause 20 # extra wait here to buffer for slow finishes
   fi
-  press $KEY_X
+  press $KEY_X standings
 
   log 'Rewards'
-  press $KEY_X
+  press $KEY_X rewards
   pause 3
 
   current_miles=$(awk -v a="$current_miles" -v b="$RACE_MILES" 'BEGIN { printf "%.1f", a + b }')
   current_money=$((current_money + RACE_PRIZE))
 
   log "$(printf "  Credits: %'d" $current_money)"
-  press $KEY_X
+  press $KEY_X credits
   pause 2
 
   log "  Miles: $current_miles"
-  press $KEY_X
+  press $KEY_X miles
   pause 4
 
   log 'Replay'
-  press $KEY_X
+  press $KEY_X replay1
   pause 4
-  press $KEY_X
+  press $KEY_X replay2
   pause 2
-  press $KEY_X
-  press $KEY_X
+  press $KEY_X replay3
+  press $KEY_X replay4
   pause 5
 
   log 'Retry'
-  press $DPAD_R
+  press $DPAD_R retry-right
   pause 1
-  press $KEY_X
+  press $KEY_X retry-x
   pause 4
 
   if [ "$MAINTENANCE_RACES" -gt 0 ] && [ $((race_count % MAINTENANCE_RACES)) -eq 0 ]; then

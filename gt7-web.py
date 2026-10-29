@@ -30,7 +30,7 @@ WEB_PORT = int(os.environ.get('WEB_PORT', '8077'))
 RUNTIME = os.environ.get('XDG_RUNTIME_DIR', '/run/user/%d' % os.getuid())
 
 FIELDS = ('time', 'on_track', 'paused', 'loading', 'lap', 'laps', 'speed', 'position',
-          'best', 'last', 'gear', 'throttle', 'brake', 'rpm')
+          'best', 'last', 'gear', 'throttle', 'brake', 'rpm', 'steer')
 LINE = re.compile(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (.*)$')
 
 
