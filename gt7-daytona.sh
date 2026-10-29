@@ -100,10 +100,18 @@ release() {
 }
 
 press() { # press <key> [label]: with a label, also save a screenshot (SCREEN_RECORD)
+  # one xdotool for both ends, so the key is held exactly KEYPRESS_LENGTH: a lookup
+  # before the keyup can make it longer, and a long press moves GT7's cursor twice
   [ -z "${2:-}" ] || snap "$2"
-  send keydown "$1"
-  sleep $KEYPRESS_LENGTH
-  send keyup "$1"
+  local try
+  for try in 1 2 3 4 5; do
+    if xdotool search --name "$WINDOW_NAME" keydown "$1" sleep $KEYPRESS_LENGTH keyup "$1" 2>/dev/null; then
+      return
+    fi
+    sleep 0.2
+  done
+  log 'ERROR: the Chiaki stream window is gone (stream disconnected?)'
+  exit 1
 }
 
 snap() { # snap <label>: save a screenshot in the background when SCREEN_RECORD is set
@@ -410,16 +418,13 @@ do
   pause 4
 
   log 'Replay'
-  press $KEY_X replay1
+  press $KEY_X replay1 # the replay's menu, with the cursor on Exit
   pause 4
-  press $KEY_X replay2
-  pause 2
-  press $KEY_X replay3
-  press $KEY_X replay4
-  pause 5
+  press $KEY_X replay2 # Exit: the race result with Replay, Retry and Exit
+  pause 4
 
   log 'Retry'
-  press $DPAD_R retry-right
+  press $DPAD_R retry-right # from Replay to Retry
   pause 1
   press $KEY_X retry-x
   pause 4

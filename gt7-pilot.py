@@ -258,16 +258,13 @@ class Pilot:
             self.pause(4)
 
             log('Replay')
-            self.press('cross', 'replay1')
+            self.press('cross', 'replay1')  # the replay's menu, with the cursor on Exit
             self.pause(4)
-            self.press('cross', 'replay2')
-            self.pause(2)
-            self.press('cross', 'replay3')
-            self.press('cross', 'replay4')
-            self.pause(5)
+            self.press('cross', 'replay2')  # Exit: the race result with Replay, Retry and Exit
+            self.pause(4)
 
             log('Retry')
-            self.press('right', 'retry-right')
+            self.press('right', 'retry-right')  # from Replay to Retry
             self.pause(1)
             self.press('cross', 'retry-x')
             self.pause(4)

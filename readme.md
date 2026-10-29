@@ -93,7 +93,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - `MAINTENANCE_RACES` (default 20): log a reminder to check the oil and engine every that many races; 0 turns it off.
 - `TELEMETRY_RECORD` (default empty): with telemetry, a directory to record every packet in (about 70 MB an hour) for `gt7-analyze.py`; see "Recording and analysis".
 - `SCREEN_RECORD` (default empty): a directory to keep screenshots of the Chiaki window in: one before each menu press, named after the step, one a second from the finish to the next start, and one every 30 seconds during the race.  It needs `xwd` (`sudo apt install x11-apps`).
-- `QUICKPRESS_LENGTH` (default 0.01) and `KEYPRESS_LENGTH` (default 0.08): how long the steering taps and the menu presses last, in seconds.  The window is looked up on every key press, which adds about 0.04 seconds to each tap; the steering is tuned with that included.
+- `QUICKPRESS_LENGTH` (default 0.01) and `KEYPRESS_LENGTH` (default 0.08): how long the steering taps and the menu presses last, in seconds.  For a steering tap the window is looked up again before the key is released, which adds about 0.04 seconds; the steering is tuned with that included.  Menu presses last exactly `KEYPRESS_LENGTH`: held longer, GT7 can move the cursor twice.
 - `WINDOW_NAME` (default `^Chiaki \| Stream$`): the Chiaki stream window title as an xdotool regular expression (case-insensitive).
 - `ANALOG_L__R`, `DPAD_R`, `KEY_R2`, `KEY_X`: keys that MUST match your Chiaki key config.  The defaults are Chiaki's default keys.
 - `LOG_FILE` (default `~/gt7-daytona.log`) and `LOCK_FILE` (default `~/.cache/gt7-daytona.lock`): used by the background commands below.
@@ -119,7 +119,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - GT7 sends live telemetry (lap, speed, position, whether the car is on track) to a computer that sends it heartbeats over UDP.  `gt7-telemetry.py` receives it with nothing but python3; GT7 needs no setting for it.
 - Let the telemetry through the computer's firewall, e.g. `sudo ufw allow from <playstation-ip> to any port 33740 proto udp`.
 - Set `PLAYSTATION_IP` in the config file.  The log says "Telemetry from ..." at start, and "Race ending (P1, best lap 1:16.856)" when the car crosses the finish line.
-- GT7 1.42 and later also send the steering angle when asked with heartbeat "B"; the script asks for it and takes the older packet when that doesn't come.  At each finish the log says how many packets came and how many were lost on the way, e.g. "Telemetry: 48210 packets (B), 3 missing (0.01%)".
+- GT7 1.42 and later also send the steering angle when asked with heartbeat "B", which the script sends (`TELEMETRY_PACKET=A` for an older GT7).  GT7 keeps the format of a stream it is already sending, so after a program that asked for "A" the packets stay "A" until that stream has run out.  At each finish the log says how many packets came and how many were lost on the way, e.g. "Telemetry: 48210 packets (B), 3 missing (0.01%)".
 - Without telemetry the script times the race with `RACE_TIME` as before.
 
 ## Recording and analysis
@@ -166,6 +166,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   - Press X twice before the first race, because the start screen hides its menu when left alone
   - Read GT7 telemetry (`PLAYSTATION_IP`): check the race started, end the race at the finish line, quit when the car is stuck, log the position and best lap
   - Web page with live telemetry and credits per hour, with start, stop-after-race and emergency stop buttons; dates in the log
+  - Fix the presses after the race for the current GT7 (two X fewer, so it no longer goes back into the replay) and hold each menu key exactly `KEYPRESS_LENGTH`
   - A virtual gamepad (`gt7/pad.py`, `gt7-pad.py`, `70-gt7-pad.rules`) to send analog values to Chiaki
   - Record every telemetry packet and screenshots of each menu step for analysis (`TELEMETRY_RECORD`, `SCREEN_RECORD`, `gt7-analyze.py`, `gt7-screen.py`); read the steering angle (heartbeat B) and log the packets received and lost per race
   - Time the race by the clock, drive straight for `STRAIGHT_TIME` after the start, grid start; `RACE_TIME` and `RACE_PRIZE` re-measured

@@ -5,6 +5,8 @@
 # are Salsa20 encrypted. The host firewall must allow UDP port 33740 in.
 # Heartbeat 'A' gets the original 296-byte packet; 'B' (GT7 1.42 and later)
 # adds the steering angle and the car's sway, heave and surge (316 bytes).
+# GT7 keeps the format of a stream it is already sending, so a 'B' heartbeat
+# gets 'A' packets until an earlier 'A' stream has run out.
 
 import datetime
 import os
@@ -21,6 +23,7 @@ NONCE_XOR = {b'A': 0xDEADBEAF, b'B': 0xDEADBEEF, b'~': 0x55FABB4F}  # per heartb
 MAGIC = 0x47375330
 SIZE_B = 0x13C
 HEARTBEAT_INTERVAL = 2  # seconds; GT7 stops sending some time after the last one
+HEARTBEAT = os.environ.get('TELEMETRY_PACKET', 'B').encode()  # A for a GT7 older than 1.42
 RECORD_MAGIC = b'GT7TEL1\n'  # then per packet: <d receive time> <H length> <decrypted packet>
 
 
@@ -144,9 +147,7 @@ class Receiver:
         return t if t and time.time() - t['time'] <= seconds else None
 
     def run(self, keep_going):
-        kind = b'B'
-        b_works = False
-        heartbeats = 0
+        kind = HEARTBEAT
         last_heartbeat = last_write = 0
         finished = False
         counter = Counter()
@@ -155,10 +156,7 @@ class Receiver:
             while keep_going():
                 now = time.time()
                 if now - last_heartbeat > HEARTBEAT_INTERVAL:
-                    # until a 'B' packet arrives, alternate with 'A' for a GT7 without it
-                    heartbeats += 1
-                    sent = b'B' if b_works or heartbeats % 2 else b'A'
-                    self.sock.sendto(sent, (self.host, SEND_PORT))
+                    self.sock.sendto(HEARTBEAT, (self.host, SEND_PORT))
                     last_heartbeat = now
                 try:
                     data = self.sock.recv(4096)
@@ -168,7 +166,6 @@ class Receiver:
                 if packet is None:
                     continue
                 kind = b'B' if len(packet) >= SIZE_B else b'A'
-                b_works = b_works or kind == b'B'
                 t = parse(packet)
                 t['time'] = now
                 if self.latest is None:
