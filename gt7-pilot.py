@@ -118,7 +118,7 @@ class Pilot:
         stick = self.line.update(t)
         lap = self.lap_log
         if t['lap'] != lap.get('lap'):
-            if lap.get('n') and 1 <= lap['lap'] <= t['laps']:
+            if lap.get('n', 0) >= 600 and 1 <= lap['lap'] <= t['laps']:  # a whole lap, not the start
                 log('  Lap %d drive: d %.2f m (%.2f..%.2f), heading %.1f deg, stick %.3f (%s)' % (
                     lap['lap'], lap['d'] / lap['n'], lap['dmin'], lap['dmax'],
                     math.degrees(lap['psi'] / lap['n']), lap['stick'] / lap['n'],

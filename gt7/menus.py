@@ -66,8 +66,7 @@ def to_start(press, look, log=lambda text: None, timeout=150, pause=time.sleep, 
                 trace(name, button)
             press(button)
             pause(1.0)  # the screen changes about half a second after a press
-            if name == 'unknown':
-                since = time.time()  # give the replay's menu time to show before another X
+            since = time.time()  # a screen that must stay a while before a press waits again
         else:
             pause(0.5)  # a fade, the cars after the finish or something new: wait
     return None
