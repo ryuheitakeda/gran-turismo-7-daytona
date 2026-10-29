@@ -30,6 +30,7 @@ WINDOW_ID = env('WINDOW_ID', '')
 WINDOW_NAME = env('WINDOW_NAME', screen.WINDOW_NAME)
 STOP_FILE = env('STOP_FILE', os.path.expanduser('~/.cache/gt7-daytona.stop-after-race'))
 KEYPRESS_LENGTH = float(env('KEYPRESS_LENGTH', '0.08'))
+DPAD_LENGTH = float(env('DPAD_LENGTH', '0.08'))  # held longer, GT7 moves the cursor twice
 FINISH_WAIT = float(env('FINISH_WAIT', '8'))
 RACE_PRIZE = int(env('RACE_PRIZE', '9705000'))
 RACE_TIME = float(env('RACE_TIME', '800'))
@@ -165,6 +166,9 @@ class Pilot:
         except (OSError, TypeError):
             pass  # the pad was closed on the way out
 
+    def menu_press(self, button):
+        self.pad.press(button, DPAD_LENGTH if button in pad.DPAD else KEYPRESS_LENGTH)
+
     def trace(self, name, button):
         if MENU_TRACE:
             log('    (%s on %s)' % (button, name))
@@ -202,7 +206,7 @@ class Pilot:
         if label:
             self.snap(label)
         self.check_window()
-        self.pad.press(button, KEYPRESS_LENGTH)
+        self.menu_press(button)
         self.pause(0.1)  # like the time xdotool takes, so two presses stay apart
 
     def start(self):
@@ -278,7 +282,7 @@ class Pilot:
                 # has hidden after a while without input, the X that brings it back can
                 # also start the race
                 refs, window = screen.references(), int(WINDOW_ID)
-                reached = menus.to_start(lambda button: self.pad.press(button, KEYPRESS_LENGTH),
+                reached = menus.to_start(self.menu_press,
                                          lambda: screen.classify(screen.capture(window), refs)[0], log,
                                          30, pause=self.pause, trace=self.trace)
                 if reached == 'start/start':
@@ -352,7 +356,7 @@ class Pilot:
                 # look at the screen before each press: skip "1st", then through the results
                 self.pad.r2(0)
                 refs, window = screen.references(), int(WINDOW_ID)
-                if not menus.to_start(lambda button: self.pad.press(button, KEYPRESS_LENGTH),
+                if not menus.to_start(self.menu_press,
                                       lambda: screen.classify(screen.capture(window), refs)[0], log,
                                       pause=self.pause, trace=self.trace):  # 'race': the next start finds it running
                     raise Quit(1, 'ERROR: the screens after the race did not lead back to the start screen')
