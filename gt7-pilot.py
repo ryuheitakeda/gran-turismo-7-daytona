@@ -9,6 +9,7 @@
 # loop. PAD=dry logs the pad instead of making one (for tests).
 
 import datetime
+import json
 import math
 import os
 import signal
@@ -17,7 +18,7 @@ import sys
 import threading
 import time
 
-from gt7 import driver, menus, pad, races, screen, telemetry
+from gt7 import driver, menus, minimap, pad, races, screen, telemetry
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 env = os.environ.get
@@ -41,6 +42,8 @@ START_TIMEOUT = float(env('START_TIMEOUT', '15'))
 STUCK_SPEED = float(env('STUCK_SPEED', '30'))
 STUCK_TIME = float(env('STUCK_TIME', '5'))
 STUCK_GIVE_UP = float(env('STUCK_GIVE_UP', '60'))  # stuck this long: give up (GT7 puts a stuck car back sooner)
+STUCK_RETRY = float(env('STUCK_RETRY', '20'))  # stuck this long: pause and retry the race (0: never)
+RETRY_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.retry')  # touch it: retry the race now
 STRAIGHT_TIME = float(env('STRAIGHT_TIME', '15'))
 MAINTENANCE_RACES = int(env('MAINTENANCE_RACES', '20'))
 LAPS = int(env('LAPS', '10'))
@@ -56,6 +59,14 @@ STEER_MAX = float(env('STEER_MAX', '0.3'))  # line: the most stick either way
 CURVE_STICK = float(env('CURVE_STICK', '0'))  # line: left stick added in the sharpest bend (less elsewhere)
 MENU_TRACE = env('MENU_TRACE', '') == '1'  # log every press on the screens after the race
 MAINT_LAP_PCT = float(env('MAINT_LAP_PCT', '1.5'))
+TRAFFIC = env('TRAFFIC', 'log')  # read the course map once a second in the race: off, log (cars close ahead)
+TRAFFIC_WITHIN = float(env('TRAFFIC_WITHIN', '200'))  # metres ahead that count as close
+TRAFFIC_FILE = env('TRAFFIC_FILE', os.path.expanduser('~/gt7-data/traffic.jsonl'))
+TRAFFIC_ACTION = env('TRAFFIC_ACTION', 'none')  # none, or inside: on a straight, hold the stick left while a car is close ahead
+TRAFFIC_STICK = float(env('TRAFFIC_STICK', '-0.25'))
+NITRO = env('NITRO', 'off')  # straights: hold R3 (nitrous) in NITRO_ZONES, metres along the track line
+NITRO_ZONES = [tuple(float(v) for v in z.split('-')) for z in env('NITRO_ZONES', '1700-2300,3700-4100,0-300').split(',')]
+STRAIGHTS = [(1700, 2400), (3700, 4100), (0, 500)]  # where TRAFFIC_ACTION=inside may move the car
 SHOTS_DIR = env('SHOTS_DIR', os.path.expanduser('~/gt7-data/shots'))  # the rewards screens (and errors)
 SHOTS_KEPT = 50  # laps this much slower than after the last maintenance: say so
 STEER_PROBE = env('STEER_PROBE', '') == '1'  # line: find the stick's dead zone once, on lap 3's back straight
@@ -97,11 +108,15 @@ class Pilot:
             except (OSError, ValueError, KeyError) as e:
                 log('WARNING: no track line (%s); steering with taps' % e)
                 self.taps = True
-        if os.path.exists(TAPS_FILE):
-            os.remove(TAPS_FILE)
+        for stale in (TAPS_FILE, RETRY_FILE):
+            if os.path.exists(stale):
+                os.remove(stale)
         self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
         threading.Thread(target=self.drive, daemon=True).start()
+        self.override_until, self.nitro_on = 0.0, False
+        if TRAFFIC != 'off' and WINDOW_ID:
+            threading.Thread(target=self.watch_traffic, daemon=True).start()
 
     def close(self):
         self.running = self.steering = False
@@ -176,8 +191,45 @@ class Pilot:
             elif abs(self.line.d) > LOST:
                 self.taps = True
                 log('WARNING: %.1f m off the track line; steering with taps for the rest of the race' % self.line.d)
+            elif time.time() < self.override_until:
+                self.pad.stick(TRAFFIC_STICK)  # moving inside past a car ahead
             else:
                 self.pad.stick(stick)
+        if NITRO == 'straights' and self.line:
+            station = self.line.hint * driver.SPACING
+            want = self.steering and any(a <= station <= b for a, b in NITRO_ZONES)
+            if want != self.nitro_on:
+                self.nitro_on = want
+                self.pad.button('r3', want)
+
+    def watch_traffic(self):
+        """Once a second in the race: read the course map and log a car close ahead; with
+        TRAFFIC_ACTION=inside, hold the stick left for a moment on a straight."""
+        traffic, window, last_log = minimap.Traffic(TRAFFIC_WITHIN), int(WINDOW_ID), 0.0
+        while self.running:
+            started = time.time()
+            if self.steering:
+                try:
+                    metres, cars = traffic.update(screen.capture(window))
+                    if metres is not None:
+                        station = self.line.hint * driver.SPACING if self.line else None
+                        t = self.rx.fresh()
+                        if started - last_log >= 5:
+                            last_log = started
+                            log('  Traffic: a car %d m ahead%s, %d on the map' % (
+                                metres, ' at %d m' % station if station is not None else '', cars))
+                        with open(TRAFFIC_FILE, 'a') as f:
+                            f.write(json.dumps({'time': datetime.datetime.now().isoformat(timespec='seconds'),
+                                                'metres': round(metres), 'station': station and round(station),
+                                                'speed': t and round(t['speed']), 'lap': t and t['lap'],
+                                                'cars': cars}) + '\n')
+                        if TRAFFIC_ACTION == 'inside' and station is not None and \
+                                any(a <= station <= b for a, b in STRAIGHTS):
+                            self.override_until = time.time() + 1.5
+                except Exception as e:
+                    log('WARNING: the course map could not be read (%s)' % e)
+                    time.sleep(5)
+            time.sleep(max(0.0, 1.0 - (time.time() - started)))
 
     def probe(self, t):
         """With STEER_PROBE, on lap 3's back straight ramp the stick from 0 to PROBE_MAX to
@@ -243,7 +295,9 @@ class Pilot:
                     state['percent'], lap_time(round(1000 * state['now'])), lap_time(round(1000 * state['base']))))
 
     def menu_press(self, button):
-        if MENU_KEYS and WINDOW_ID and button in KEYS and not isinstance(self.pad, pad.DryPad):
+        if button == 'options':  # only the pad has it (the key is not known)
+            self.pad.press('options', KEYPRESS_LENGTH)
+        elif MENU_KEYS and WINDOW_ID and button in KEYS and not isinstance(self.pad, pad.DryPad):
             # one xdotool, so the key is held exactly 0.08 s (longer, GT7 moves the cursor twice)
             subprocess.run(['xdotool', 'keydown', '--window', WINDOW_ID, KEYS[button], 'sleep', '0.08',
                             'keyup', '--window', WINDOW_ID, KEYS[button]], check=False)
@@ -263,6 +317,23 @@ class Pilot:
             if self.reward_presses == 2 and self.last_image:
                 self.balance_after = screen.read_number(self.last_image, screen.REWARD_BALANCE)
                 self.keep_shot('reward', self.last_image)
+
+    def retry_race(self):
+        """Pause the race and pick Retry; it restarts at the grid. True when the race shows again."""
+        self.steering = False
+        self.pad.r2(0)
+        self.pad.stick(0.0)
+        log('  Retrying the race from the pause menu')
+        refs, window = screen.references(), int(WINDOW_ID)
+        return menus.retry_race(self.menu_press, lambda: self.look(window, refs), log,
+                                pause=self.pause, trace=self.trace)
+
+    def error_shot(self):
+        """Keep a screenshot of the window for the web page before quitting on an error."""
+        try:
+            self.keep_shot('error', screen.capture(int(WINDOW_ID)))
+        except Exception as e:
+            log('WARNING: no error screenshot (%s)' % e)
 
     def keep_shot(self, kind, image):
         """Save SHOTS_DIR/<kind>-<time>.png, keeping the newest SHOTS_KEPT of the kind."""
@@ -386,6 +457,8 @@ class Pilot:
                 refs, window = screen.references(), int(WINDOW_ID)
                 reached = menus.to_start(self.menu_press, lambda: self.look(window, refs), log,
                                          30, pause=self.pause, trace=self.trace)
+                if reached is None:
+                    self.error_shot()
                 if reached == 'start/start':
                     # the credits before the race, to tell the reward from the balance after it: the
                     # last rewards screen's balance (big digits) or, first, the top bar's (small, misread more)
@@ -413,6 +486,7 @@ class Pilot:
                 if not t or t['on_track']:
                     break
                 if time.time() >= deadline:
+                    self.error_shot()
                     raise Quit(1, 'ERROR: the race did not start (telemetry: the car is not on track)')
                 self.pause(0.5)
 
@@ -427,6 +501,7 @@ class Pilot:
             started = time.time()
             steer_start, race_end = started + STRAIGHT_TIME, started + RACE_TIME
             slow_since, stuck, checked, result = None, False, started, ''
+            retried = restarted = False
             while True:
                 t, now = self.rx.fresh(), time.time()
                 if t:
@@ -440,7 +515,15 @@ class Pilot:
                             stuck, self.taps = True, True
                             log('  The car is stuck (lap %d, %d km/h for %ds); driving on with taps'
                                 % (t['lap'], t['speed'], STUCK_TIME))
+                        if STUCK_RETRY > 0 and now - slow_since >= STUCK_RETRY and not retried \
+                                and screen.references():  # the pause menu is told by the screen
+                            retried = True
+                            if self.retry_race():
+                                restarted = True
+                                break
+                            log('WARNING: could not retry the race from the pause menu')
                         if now - slow_since >= STUCK_GIVE_UP:
+                            self.error_shot()
                             raise Quit(1, 'ERROR: the car is stuck (lap %d, %d km/h for %ds)'
                                        % (t['lap'], t['speed'], STUCK_GIVE_UP))
                     else:
@@ -456,10 +539,24 @@ class Pilot:
                 if now - checked >= 5:
                     self.check_window()
                     checked = now
+                    if os.path.exists(RETRY_FILE) and screen.references():
+                        os.remove(RETRY_FILE)
+                        log('  Retrying the race as asked (%s)' % RETRY_FILE)
+                        if self.retry_race():
+                            restarted = True
+                            break
+                        log('WARNING: could not retry the race from the pause menu')
                 self.steering = now >= steer_start
                 self.pause(0.1)
             self.steering = False
             self.pad.stick(0.0)
+            if self.nitro_on:
+                self.nitro_on = False
+                self.pad.button('r3', False)
+            if restarted:
+                log('  The race starts again from the grid')
+                self.count -= 1  # the same race again
+                continue
 
             log('  Race ending' + result)
             finish, seconds = t, time.time() - started
@@ -474,6 +571,7 @@ class Pilot:
                 if not menus.to_start(self.menu_press, lambda: self.look(window, refs), log,
                                       pause=self.pause, trace=self.trace, after_race=True):
                     # ('race' after the screens after it: the next start finds it running)
+                    self.error_shot()
                     raise Quit(1, 'ERROR: the screens after the race did not lead back to the start screen')
                 if self.balance_before and self.balance_after and \
                         0 < self.balance_after - self.balance_before <= 1.2 * RACE_PRIZE:

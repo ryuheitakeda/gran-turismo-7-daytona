@@ -85,7 +85,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   ```
 
 - `PLAYSTATION_IP` (default empty): your Playstation's IP address.  When set, the script reads GT7's telemetry (see below) to check that the race started, to end the race at the finish line, and to quit when the car gets stuck.
-- `START_TIMEOUT` (default 15), `STUCK_SPEED` (default 30) and `STUCK_TIME` (default 5): with telemetry, quit when the car isn't on track that many seconds after pressing X, or stays below `STUCK_SPEED` km/h for `STUCK_TIME` seconds during the race.  With `PILOT=1` a stuck car doesn't end the run: it logs it and drives on with R2 and taps, because GT7 puts a car that's stuck back on the track, and only quits when it is still stuck after `STUCK_GIVE_UP` seconds (default 60).
+- `START_TIMEOUT` (default 15), `STUCK_SPEED` (default 30) and `STUCK_TIME` (default 5): with telemetry, quit when the car isn't on track that many seconds after pressing X, or stays below `STUCK_SPEED` km/h for `STUCK_TIME` seconds during the race.  With `PILOT=1` a stuck car doesn't end the run: it logs it and drives on with R2 and taps, because GT7 puts a car that's stuck back on the track.  Still stuck after `STUCK_RETRY` seconds (default 20), it pauses the race and picks Retry, which restarts it at the grid (see "Recovery"), and only quits when it is still stuck after `STUCK_GIVE_UP` seconds (default 60).
 - `RACE_TIME` (default 800): seconds from the "Race start" log line until you cross the finish line.  It was measured with the grid start above; you will need to set it according to your vehicle speed.  With telemetry it is only used when the telemetry stops coming.
   - If you're not sure, start with the time it takes to rubber-band the race.
 - `STRAIGHT_TIME` (default 15): seconds to drive straight after the start before steering towards the wall.
@@ -97,6 +97,8 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - `QUICKPRESS_LENGTH` (default 0.01) and `KEYPRESS_LENGTH` (default 0.08): how long the steering taps and the menu presses last, in seconds.  For a steering tap the window is looked up again before the key is released, which adds about 0.04 seconds; the steering is tuned with that included.  Menu presses last exactly `KEYPRESS_LENGTH`: held longer, GT7 can move the cursor twice.
 - `WINDOW_NAME` (default `^Chiaki \| Stream$`): the Chiaki stream window title as an xdotool regular expression (case-insensitive).
 - `ANALOG_L__R`, `DPAD_L`, `DPAD_R`, `KEY_O`, `KEY_R2`, `KEY_X`: keys that MUST match your Chiaki key config.  The defaults are Chiaki's default keys.
+- `TRAFFIC` (default log): with `PILOT=1`, read the course map at the top right of the race once a second and log a car within `TRAFFIC_WITHIN` metres ahead (default 200); `off` turns it off.  `TRAFFIC_ACTION=inside` holds the stick `TRAFFIC_STICK` (default -0.25, left) for a moment on the straights while a car is close ahead; it is an experiment, off by default.
+- `NITRO` (default off): with `PILOT=1` and `DRIVE=line`, `straights` holds R3 (nitrous, if the car has it and the game maps it there) in `NITRO_ZONES`, metres along the track line (default `1700-2300,3700-4100,0-300`).  An experiment too.
 - `DRIVE` (default pwm): with `PILOT=1`, how to steer: `pwm` (taps like the keys), `shadow` (taps, and log for each lap what `line` would do) or `line` (steer by the track line, see "Steering by the line"; with `WALL_GAP=0.1` the fastest found).  `WALL_GAP` (default 0.3), `STEER_KD` (0.1), `STEER_KPSI` (1.0), `STEER_MAX` (0.3) and `CURVE_STICK` (0) tune `line`.
 - `MENUS` (default auto): how to get through the screens after the race: `screen` (look at the screen before each press, see "Screens"), `timer` (press on a timer), or `auto`: `screen` once the screens are learned.  The "Started:" log line says which.
 - `LOG_FILE` (default `~/gt7-daytona.log`) and `LOCK_FILE` (default `~/.cache/gt7-daytona.lock`): used by the background commands below.
@@ -148,6 +150,13 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - So the fastest way found is `DRIVE=line` with `WALL_GAP=0.1`: the stick stays inside the dead zone, the car rides the wall with no steering at all, and laps in 76.5 seconds against 79.2 with the taps (the taps' small right swings cost speed).  On the wall with no input the telemetry's steering angle reads 6 to 8 degrees left: the wall deflects the front wheels.
 - `DRIVE=shadow` taps as usual and logs each lap's d, heading and stick, to check the line before steering by it.  The analysis table shows each lap's d against the line too.
 
+## Recovery
+
+- When the car is stuck (below `STUCK_SPEED` for `STUCK_TIME` seconds), the script drives on with taps, since GT7 puts a car that's stuck back on the track.  If that hasn't helped after `STUCK_RETRY` seconds, it presses OPTIONS, moves to Retry on the pause menu and presses X: GT7 restarts the race at the grid, with no confirmation, and the script drives it as a new race.  The pause menu is told by its bar of four buttons, so it needs no reference of its own; the `race` reference must be learned.
+- `touch ~/.cache/gt7-daytona.retry` makes it retry the race now (to try the recovery, or to give up a race that has gone wrong), and `touch ~/.cache/gt7-daytona.taps` makes it steer with taps for the rest of the session.
+- When the screens after a race don't lead back to the start screen, or the race doesn't start, or the car stays stuck, the script keeps a screenshot (`SHOTS_DIR/error-<time>.png`) and quits; the web page shows the newest one while the script isn't running.
+- Twice on 2026-10-29 the car hit a lapped car that was on the wall line and ended up stuck or spun.  The telemetry doesn't say where the other cars are, so the script reads the course map (`TRAFFIC`); for now it only logs them (`~/gt7-data/traffic.jsonl`), to work out how to pass them.
+
 ## Rewards
 
 - With `PILOT=1`, `MENUS=screen` and tesseract (`sudo apt install tesseract-ocr`), the script reads the credits in the start screen's top bar before each race, and the balance on the rewards screen once it has filled in.  The difference is the reward.  The log says "Reward: 12,780,000 Cr (balance ...)", with a warning when it's less than `RACE_PRIZE` (the clean race bonus lost to a bump, say).  Each rewards screen is kept in `SHOTS_DIR` (default `~/gt7-data/shots`, the newest 50).
@@ -197,6 +206,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   - Press X twice before the first race, because the start screen hides its menu when left alone
   - Read GT7 telemetry (`PLAYSTATION_IP`): check the race started, end the race at the finish line, quit when the car is stuck, log the position and best lap
   - Web page with live telemetry and credits per hour, with start, stop-after-race and emergency stop buttons; dates in the log
+  - Retry the race from the pause menu when the car stays stuck, keep a screenshot on every error and show it on the web page; read the course map for cars close ahead (`TRAFFIC`), with `inside` and `NITRO` as experiments
   - Read the reward from the credits before and after each race (tesseract), warn when it's short, keep the rewards screens and show the newest on the web page
   - Each lap's time and top speed in the log, a line per race in `RACES_FILE`, and a word when the laps get slower than after the last maintenance (`maintenance-done`, the web page's engine card)
   - With `PILOT=1`, drive on with taps when the car gets stuck, and only quit after `STUCK_GIVE_UP` seconds

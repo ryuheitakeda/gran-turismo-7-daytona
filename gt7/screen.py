@@ -34,13 +34,23 @@ SCREENS = {
     'result-menu': [(385, 550, 220, 150)],  # the Replay button's menu, over the race result
     'race': [(85, 28, 70, 20), (195, 28, 35, 20)],  # POSITION and LAP over the race
 }
-# x ranges of the buttons along the bottom; the one the cursor is on has a white edge
+# the buttons of a screen: the rows to look at, and each button's x range; the one the
+# cursor is on is white there (an edge on the start and result screens, the whole
+# button on the pause menu)
 BUTTONS = {
-    'start': {'start': (225, 375), 'replay': (425, 575), 'settings': (625, 775),
-              'options': (820, 870), 'shop': (915, 965), 'exit': (1005, 1060)},
-    'result': {'replay': (420, 565), 'retry': (620, 765), 'exit': (815, 865)},
+    'start': (640, 650, {'start': (225, 375), 'replay': (425, 575), 'settings': (625, 775),
+                         'options': (820, 870), 'shop': (915, 965), 'exit': (1005, 1060)}),
+    'result': (640, 650, {'replay': (420, 565), 'retry': (620, 765), 'exit': (815, 865)}),
+    'pause': (345, 352, {'continue': (240, 432), 'retry': (442, 635), 'settings': (645, 838),
+                         'exit': (848, 1040)}),
 }
-LIT = 170  # grey of a lit button edge (about 215); unlit ones are 45-110
+LIT = 170  # grey of a lit button (about 215-225); unlit ones are 45-110
+# the pause menu is the race with a bar of four buttons over it: between that many text
+# pixels there (a white flash has them all), one button white and the other three dark
+PAUSE_BAR = (235, 340, 810, 40)
+PAUSE_TEXT = (1500, 2500)  # measured 1920 and 1983
+PAUSE_LIT = (200, 245)  # the white button, measured 221 and 224
+PAUSE_DARK = (60, 125)  # the three grey ones, measured 79 to 107
 BRIGHT = 160  # grey above which a pixel counts as text
 MATCH = 20  # percent of the text pixels that may differ for a screen to count as seen
 
@@ -154,20 +164,43 @@ def distances(image, refs):
     return sorted(out)
 
 
+def button_greys(image, buttons):
+    """Each button's brightest row (mean grey). buttons is BUTTONS[screen]."""
+    y0, y1, ranges = buttons
+    return {name: max(sum(v) / len(v) for v in (grey(image, (x0, y, x1 - x0, 1), 2) for y in range(y0, y1)))
+            for name, (x0, x1) in ranges.items()}
+
+
 def lit_button(image, buttons):
-    """The button with the white edge of the cursor, or None."""
-    for name, (x0, x1) in buttons.items():
-        if max(sum(v) / len(v) for v in (grey(image, (x0, y, x1 - x0, 1), 2) for y in range(640, 650))) > LIT:
+    """The button the cursor is on (white), or None."""
+    for name, value in button_greys(image, buttons).items():
+        if value > LIT:
             return name
     return None
+
+
+def pause_menu(image):
+    """'continue', 'retry', 'settings' or 'exit' when the pause menu shows with the cursor
+    there, else None."""
+    if not PAUSE_TEXT[0] <= sum(text(image, PAUSE_BAR)) <= PAUSE_TEXT[1]:
+        return None
+    greys = button_greys(image, BUTTONS['pause'])
+    lit = [name for name, v in greys.items() if PAUSE_LIT[0] <= v <= PAUSE_LIT[1]]
+    dark = [name for name, v in greys.items() if PAUSE_DARK[0] <= v <= PAUSE_DARK[1]]
+    return lit[0] if len(lit) == 1 and len(dark) == 3 else None
 
 
 def classify(image, refs):
     """The screen the image shows, with the distance: e.g. 'rewards', 'result/retry'
     (the race result with the cursor on Retry), 'result/menu' (the Replay menu is
-    open), 'start/start', 'start-idle' (its menu hid) or 'unknown'."""
+    open), 'start/start', 'start-idle' (its menu hid), 'pause/continue' (the race
+    paused, cursor on Continue) or 'unknown'."""
     if image[0] != WIDTH or image[1] != HEIGHT:
         return 'unknown', 255.0
+    # the pause menu dims the race under it, so look for its bar first
+    lit = pause_menu(image)
+    if lit:
+        return 'pause/' + lit, 0.0
     best = distances(image, {k: v for k, v in refs.items() if k not in ('result-menu', 'start-idle')})
     if not best or best[0][0] >= MATCH:
         # nothing else, but the top bar of the menus: the start screen after its menu hid

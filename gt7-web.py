@@ -138,8 +138,16 @@ def engine():
     }
 
 
+def error_shot_time():
+    try:
+        newest = max(f for f in os.listdir(SHOTS_DIR) if f.startswith('error-') and f.endswith('.png'))
+        return newest[6:-4]  # YYYYMMDD-HHMMSS
+    except (OSError, ValueError):
+        return None
+
+
 def state():
-    return {'telemetry': telemetry(), 'running': script_running(),
+    return {'telemetry': telemetry(), 'running': script_running(), 'error_shot': error_shot_time(),
             'stop_after_race': os.path.exists(STOP_FILE), 'engine': engine(), **earnings()}
 
 
@@ -257,6 +265,8 @@ pre { margin: 0; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; 
   <section class="card" style="grid-column: 1 / -1">
     <h2>ログ</h2>
     <pre id="log"></pre>
+    <div id="error_box" style="display:none"><p class="note">止まったときの画面（<span id="error_time"></span>）</p>
+    <img id="error_shot" alt="" style="width:100%;max-width:640px;border-radius:8px"></div>
   </section>
 </div>
 </main>
@@ -329,6 +339,12 @@ async function update() {
   $('today_per_hour').textContent = `${fmt(d.per_hour)} Cr`;
   $('log').textContent = s.log.join('\\n');
   engine(s.engine);
+  if (!s.running && s.error_shot) {
+    const t = s.error_shot;
+    $('error_time').textContent = `${t.slice(4, 6)}/${t.slice(6, 8)} ${t.slice(9, 11)}:${t.slice(11, 13)}`;
+    if ($('error_shot').dataset.t !== t) { $('error_shot').dataset.t = t; $('error_shot').src = 'shot/error?' + t; }
+    $('error_box').style.display = 'block';
+  } else $('error_box').style.display = 'none';
 }
 update(); setInterval(update, 1000);
 const shot = () => { $('reward_shot').src = 'shot/reward?' + Date.now(); };
@@ -341,10 +357,11 @@ shot(); setInterval(shot, 30000);
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path.split('?')[0] == '/shot/reward':
-            # the newest rewards screen gt7-pilot.py kept
+        if self.path.split('?')[0] in ('/shot/reward', '/shot/error'):
+            # the newest rewards screen, or the screen at the last error, gt7-pilot.py kept
+            kind = self.path.split('?')[0].split('/')[-1]
             try:
-                newest = max(f for f in os.listdir(SHOTS_DIR) if f.startswith('reward-') and f.endswith('.png'))
+                newest = max(f for f in os.listdir(SHOTS_DIR) if f.startswith(kind + '-') and f.endswith('.png'))
                 body, kind = open(os.path.join(SHOTS_DIR, newest), 'rb').read(), 'image/png'
             except (OSError, ValueError):
                 self.send_error(404)

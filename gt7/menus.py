@@ -77,3 +77,43 @@ def to_start(press, look, log=lambda text: None, timeout=150, pause=time.sleep, 
         else:
             pause(0.5)  # a fade, the cars after the finish or something new: wait
     return None
+
+
+PAUSE_TO_RETRY = {'pause/continue': 'right', 'pause/settings': 'left', 'pause/exit': 'left'}
+
+
+def retry_race(press, look, log=lambda text: None, timeout=60, pause=time.sleep, trace=None):
+    """Pause the race (press('options')) and pick Retry: GT7 restarts the race at the
+    grid at once, with no confirmation. Returns True when the race shows again,
+    False when the pause menu or the restarted race doesn't show in time."""
+    deadline = time.time() + timeout
+    last, since, presses = None, time.time(), 0
+    while time.time() < deadline:
+        name = look()
+        if name != last:
+            last, since, presses = name, time.time(), 0
+        if presses >= 4:
+            return False  # the presses change nothing: not GT7's pause menu after all
+        button = None
+        if name == 'pause/retry':
+            button = 'cross'
+        elif name in PAUSE_TO_RETRY:
+            button = PAUSE_TO_RETRY[name]
+        elif name == 'race' and time.time() - since >= 1.0:
+            button = 'options'  # open the pause menu (again when the press was lost)
+        if button:
+            if trace:
+                trace(name, button)
+            press(button)
+            presses += 1
+            pause(1.5)
+            if button == 'cross':
+                while time.time() < deadline:  # the restart loads for a few seconds
+                    if look() == 'race':
+                        return True
+                    pause(0.5)
+                return False
+            since = time.time()
+        else:
+            pause(0.5)
+    return False

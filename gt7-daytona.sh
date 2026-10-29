@@ -49,12 +49,16 @@ START_TIMEOUT=${START_TIMEOUT:-15} # with telemetry, quit if the car isn't on tr
 STUCK_SPEED=${STUCK_SPEED:-30} # with telemetry, km/h below which the car counts as stuck
 STUCK_TIME=${STUCK_TIME:-5} # with telemetry, quit after being stuck this many seconds (PILOT=1: drive on with taps)
 STUCK_GIVE_UP=${STUCK_GIVE_UP:-60} # with PILOT=1, quit when still stuck after this many seconds
+STUCK_RETRY=${STUCK_RETRY:-20} # with PILOT=1 and the screens learned, pause and retry the race when stuck this many seconds (0: never)
 STRAIGHT_TIME=${STRAIGHT_TIME:-15} # seconds to drive straight after the start to avoid hitting cars ahead
 CURVE_STICK=${CURVE_STICK:-0} # with DRIVE=line, left stick added in the sharpest bend, less in gentler ones
 STEER_KD=${STEER_KD:-0.1} # with DRIVE=line, stick per metre off the aim
 STEER_KPSI=${STEER_KPSI:-1.0} # with DRIVE=line, stick per radian of heading towards the wall
 STEER_MAX=${STEER_MAX:-0.3} # with DRIVE=line, the most stick either way (1 is full lock)
+NITRO=${NITRO:-off} # with PILOT=1 and DRIVE=line: straights holds R3 (nitrous) in NITRO_ZONES (metres along the line, default 1700-2300,3700-4100,0-300)
 TAP_INTERVAL=${TAP_INTERVAL:-0.58} # with PILOT=1, seconds from one steering tap to the next
+TRAFFIC=${TRAFFIC:-log} # with PILOT=1: read the course map once a second in the race and log a car close ahead (off to stop)
+TRAFFIC_ACTION=${TRAFFIC_ACTION:-none} # inside: on a straight, hold the stick TRAFFIC_STICK (-0.25) left while a car is within TRAFFIC_WITHIN (200) m ahead
 TAP_LENGTH=${TAP_LENGTH:-0.053} # with PILOT=1, seconds each steering tap lasts (the key taps measured on :0)
 TELEMETRY_RECORD=${TELEMETRY_RECORD:-} # with telemetry, directory to record every packet in (gt7-analyze.py), empty for none
 WALL_GAP=${WALL_GAP:-0.3} # with DRIVE=line, metres inside the wall line (gt7-analyze.py track) to aim for
@@ -311,8 +315,9 @@ if [ "$PILOT" = 1 ]; then
   export PLAYSTATION_IP TELEMETRY_FILE TELEMETRY_RECORD SCREEN_DIR WINDOW_ID WINDOW_NAME STOP_FILE PAD MENUS \
     KEYPRESS_LENGTH FINISH_WAIT RACE_PRIZE RACE_TIME START_TIMEOUT STUCK_SPEED STUCK_TIME STRAIGHT_TIME \
     MAINTENANCE_RACES LAPS LAP_MILES TAP_LENGTH TAP_INTERVAL DRIVE WALL_GAP STEER_KD STEER_KPSI STEER_MAX \
-    MENU_TRACE DPAD_LENGTH CURVE_STICK STEER_PROBE STUCK_GIVE_UP RACES_FILE MAINT_LAP_PCT \
+    MENU_TRACE DPAD_LENGTH CURVE_STICK STEER_PROBE STUCK_GIVE_UP STUCK_RETRY RACES_FILE MAINT_LAP_PCT \
     KEY_X KEY_O DPAD_L DPAD_R
+  export TRAFFIC TRAFFIC_WITHIN TRAFFIC_FILE TRAFFIC_ACTION TRAFFIC_STICK NITRO NITRO_ZONES
   "$(dirname "$0")/gt7-pilot.py" 9>&- &
   status=0
   wait $! || status=$?
