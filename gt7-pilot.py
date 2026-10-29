@@ -465,7 +465,7 @@ class Pilot:
                     self.balance_before = self.balance_after or screen.read_number(self.last_image, screen.TOP_CREDITS)
                     self.press('cross', 'start')
                 elif reached == 'race':
-                    log('  The race started on the X that brought back the start menu')
+                    log('  The race is already running (restarted, or started by the X that woke the menu)')
                 else:
                     raise Quit(1, 'ERROR: not on the start screen')
             else:
