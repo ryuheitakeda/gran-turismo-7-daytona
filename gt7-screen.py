@@ -7,7 +7,7 @@
 #        gt7-screen.py classify [<file.png or dir> ...]
 #        gt7-screen.py wait [--id <window>] <screen>[,<screen>...] <seconds>
 #        gt7-screen.py to-start [--id <window>] [--keys <cross>,<circle>,<left>,<right>]
-#                               [--wake] [--timeout <seconds>] [--check]
+#                               [--timeout <seconds>] [--check]
 #   record saves <dir>/<HHMMSS.s>-<label>.png every <seconds> until it is stopped.
 #   learn keeps the screen's parts of a screenshot as the reference for it.
 #   classify prints the screen each picture (or the window now) shows.
@@ -15,8 +15,7 @@
 #   to-start presses through the screens after a race (with xdotool, Chiaki's default
 #   keys unless --keys) until the start screen shows: exit 0 there, 1 if it doesn't
 #   get there, 2 (or with --check, 0) depending on whether the references it needs
-#   have been learned. --wake presses X once after 5 seconds of an unknown screen
-#   (the start screen with its menu hidden).
+#   have been learned. It presses nothing on a screen it doesn't know.
 #   Without --id the window is found by WINDOW_NAME (default '^Chiaki \| Stream$').
 
 import argparse
@@ -44,7 +43,6 @@ def main():
     parser.add_argument('--keys', default='Return,BackSpace,Left,Right',
                         help='to-start: xdotool keys for cross, circle, left and right')
     parser.add_argument('--check', action='store_true', help='to-start: only check the references')
-    parser.add_argument('--wake', action='store_true', help='to-start: press X once after 5 s of an unknown screen')
     parser.add_argument('--timeout', type=float, default=150, help='to-start: give up after these seconds')
     parser.add_argument('args', nargs='*')
     args = parser.parse_args()
@@ -109,7 +107,7 @@ def main():
         def log(text):
             print(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S ') + text, flush=True)
         if not menus.to_start(press, lambda: screen.classify(screen.capture(win), refs)[0], log,
-                              args.timeout, wake=5 if args.wake else None):
+                              args.timeout):
             sys.exit(1)
     else:
         parser.print_usage(sys.stderr)

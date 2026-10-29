@@ -214,12 +214,12 @@ class Pilot:
             self.count += 1
             log('Race %d' % self.count)
             if MENUS == 'screen':
-                # press Start only on the start screen with the cursor on it; X wakes the
-                # start screen when its menu has hidden after a while without input
+                # press Start only on the start screen with the cursor on it (X brings back
+                # its menu when it has hidden after a while without input)
                 refs, window = screen.references(), int(WINDOW_ID)
                 if not menus.to_start(lambda button: self.pad.press(button, KEYPRESS_LENGTH),
                                       lambda: screen.classify(screen.capture(window), refs)[0], log,
-                                      30, pause=self.pause, wake=5):
+                                      30, pause=self.pause):
                     raise Quit(1, 'ERROR: not on the start screen')
             elif self.count == 1:
                 # the start screen hides its menu after a while without input, and the

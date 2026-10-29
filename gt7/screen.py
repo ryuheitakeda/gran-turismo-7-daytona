@@ -24,6 +24,7 @@ WIDTH, HEIGHT = 1280, 720  # the regions below are for this size
 # GT7 in 2026-10; brightness is the grey above which a pixel counts as text (default BRIGHT)
 SCREENS = {
     'start': [(20, 62, 140, 46), (480, 530, 320, 30)],  # title, laps and start type
+    'start-idle': [(20, 4, 300, 46)],  # the menu screens' top bar: the start screen after its menu hid
     'finish': [(575, 310, 130, 100, 215), (600, 676, 80, 28)],  # "1st" (white, not the yellow line), "x next"
     'standings': [(485, 30, 330, 72), (600, 676, 80, 28)],  # logo and title, "x next"
     'rewards': [(100, 318, 290, 58), (600, 658, 80, 28)],  # REWARDS, "x next"
@@ -164,11 +165,14 @@ def lit_button(image, buttons):
 def classify(image, refs):
     """The screen the image shows, with the distance: e.g. 'rewards', 'result/retry'
     (the race result with the cursor on Retry), 'result/menu' (the Replay menu is
-    open), 'start/start' or 'unknown'."""
+    open), 'start/start', 'start-idle' (its menu hid) or 'unknown'."""
     if image[0] != WIDTH or image[1] != HEIGHT:
         return 'unknown', 255.0
-    best = distances(image, {k: v for k, v in refs.items() if k != 'result-menu'})
+    best = distances(image, {k: v for k, v in refs.items() if k not in ('result-menu', 'start-idle')})
     if not best or best[0][0] >= MATCH:
+        # nothing else, but the top bar of the menus: the start screen after its menu hid
+        if 'start-idle' in refs and distances(image, {'start-idle': refs['start-idle']})[0][0] < MATCH:
+            return 'start-idle', distances(image, {'start-idle': refs['start-idle']})[0][0]
         return 'unknown', best[0][0] if best else 255.0
     distance, name = best[0]
     if name == 'result' and 'result-menu' in refs and \

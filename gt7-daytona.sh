@@ -337,9 +337,9 @@ do
 
   log "Race $race_count"
   if [ "$MENUS" = screen ]; then
-    # press Start only on the start screen with the cursor on it; X wakes the
-    # start screen when its menu has hidden after a while without input
-    if ! "$(dirname "$0")/gt7-screen.py" to-start --id "$WINDOW_ID" --wake --timeout 30 \
+    # press Start only on the start screen with the cursor on it (X brings back
+    # its menu when it has hidden after a while without input)
+    if ! "$(dirname "$0")/gt7-screen.py" to-start --id "$WINDOW_ID" --timeout 30 \
          --keys "$KEY_X,$KEY_O,$DPAD_L,$DPAD_R" 9>&-; then
       log 'ERROR: not on the start screen'
       exit 1
