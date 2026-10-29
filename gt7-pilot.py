@@ -45,6 +45,8 @@ STUCK_GIVE_UP = float(env('STUCK_GIVE_UP', '60'))  # stuck this long: give up (G
 STUCK_RETRY = float(env('STUCK_RETRY', '20'))  # stuck this long: pause and retry the race (0: never)
 LAUNCH_THROTTLE = float(env('LAUNCH_THROTTLE', '0.5'))  # R2 from standstill: full R2 spins the rear out
 LAUNCH_TIME = float(env('LAUNCH_TIME', '3'))  # seconds from moving off to full R2 (LAUNCH_THROTTLE for the first third)
+LAUNCH_KPSI = float(env('LAUNCH_KPSI', '2.0'))  # line, until STRAIGHT_TIME: stick per radian of heading towards the wall
+LAUNCH_MAX = float(env('LAUNCH_MAX', '0.5'))  # the most stick then
 RETRY_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.retry')  # touch it: retry the race now
 STRAIGHT_TIME = float(env('STRAIGHT_TIME', '15'))
 MAINTENANCE_RACES = int(env('MAINTENANCE_RACES', '20'))
@@ -115,7 +117,7 @@ class Pilot:
                 os.remove(stale)
         # (before the telemetry thread, whose on_packet reads them)
         self.override_until, self.nitro_on, self.r2_on, self.off_line = 0.0, False, False, False
-        self.r2_level, self.moving_since = 0.0, None
+        self.r2_level, self.moving_since, self.launching = 0.0, None, False
         self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
         threading.Thread(target=self.drive, daemon=True).start()
@@ -197,6 +199,13 @@ class Pilot:
             lap['dmin'], lap['dmax'] = min(lap['dmin'], self.line.d), max(lap['dmax'], self.line.d)
 
     def steer_by_line(self, t, stick):
+        if DRIVE == 'line' and self.launching and not self.taps and t['speed'] > 15:  # (psi is fresh above 11)
+            # from the grid until STRAIGHT_TIME: keep the heading along the line (steer left as
+            # soon as it turns towards the wall), without the pull to the wall. Straight on, the
+            # rear stepped out and the car met the wall nose-first at 50 km/h, again and again
+            # with traction control 3 (2026-10-30 02:12-02:53)
+            self.pad.stick(max(-LAUNCH_MAX, min(LAUNCH_MAX, -LAUNCH_KPSI * self.line.psi)))
+            return
         if DRIVE == 'line' and self.steering and not self.taps and self.probe(t):
             return
         if DRIVE == 'line' and self.steering and not self.taps:
@@ -633,8 +642,9 @@ class Pilot:
                             break
                         log('WARNING: could not retry the race from the pause menu')
                 self.steering = now >= steer_start
+                self.launching = not self.steering
                 self.pause(0.1)
-            self.steering = False
+            self.steering = self.launching = False
             self.pad.stick(0.0)
             if self.nitro_on:
                 self.nitro_on = False
