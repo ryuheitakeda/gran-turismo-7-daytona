@@ -52,7 +52,9 @@ STEER_KPSI = float(env('STEER_KPSI', '1.0'))  # line: stick per radian of headin
 STEER_MAX = float(env('STEER_MAX', '0.3'))  # line: the most stick either way
 CURVE_STICK = float(env('CURVE_STICK', '0'))  # line: left stick added in the sharpest bend (less elsewhere)
 MENU_TRACE = env('MENU_TRACE', '') == '1'  # log every press on the screens after the race
-MAINT_LAP_PCT = float(env('MAINT_LAP_PCT', '1.5'))  # laps this much slower than after the last maintenance: say so
+MAINT_LAP_PCT = float(env('MAINT_LAP_PCT', '1.5'))
+SHOTS_DIR = env('SHOTS_DIR', os.path.expanduser('~/gt7-data/shots'))  # the rewards screens (and errors)
+SHOTS_KEPT = 50  # laps this much slower than after the last maintenance: say so
 STEER_PROBE = env('STEER_PROBE', '') == '1'  # line: find the stick's dead zone once, on lap 3's back straight
 PROBE_FROM, PROBE_TO, PROBE_MAX = 1700, 2300, 0.3  # metres along the line, and the stick it ramps up to (right)
 TAPS_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.taps')  # touch it: back to taps
@@ -84,6 +86,7 @@ class Pilot:
         self.snapper = None
         self.pad = pad.DryPad() if env('PAD') == 'dry' else pad.Pad()
         self.line, self.taps, self.lap_log, self.race_laps = None, DRIVE != 'line', {}, []
+        self.last_image, self.reward_presses, self.balance_before, self.balance_after = None, 0, None, None
         if DRIVE in ('shadow', 'line'):
             try:
                 self.line = driver.LineDriver(driver.Track.load(), WALL_GAP, STEER_KD, STEER_KPSI, STEER_MAX,
@@ -210,7 +213,7 @@ class Pilot:
         except (OSError, TypeError):
             pass  # the pad was closed on the way out
 
-    def keep_race(self, t, seconds):
+    def keep_race(self, t, seconds, reward=None, balance=None):
         """A line in RACES_FILE for the race just finished, and a word when the laps have
         got slower than after the last maintenance (#22)."""
         laps = sorted(self.race_laps)
@@ -223,6 +226,7 @@ class Pilot:
             'best': t['best'] / 1000 if t['best'] > 0 else None,
             'max_speed': round(max((v for n, s, v in laps), default=0)),
             'drive': 'taps' if self.taps else DRIVE, 'prize': RACE_PRIZE,
+            'reward': reward, 'balance': balance,
         }
         try:
             races.append(record)
@@ -238,9 +242,30 @@ class Pilot:
     def menu_press(self, button):
         self.pad.press(button, DPAD_LENGTH if button in pad.DPAD else KEYPRESS_LENGTH)
 
+    def look(self, window, refs):
+        self.last_image = screen.capture(window)
+        return screen.classify(self.last_image, refs)[0]
+
     def trace(self, name, button):
         if MENU_TRACE:
             log('    (%s on %s)' % (button, name))
+        if name == 'rewards':
+            # the first X fills in the credits: before the next one the balance is final
+            self.reward_presses += 1
+            if self.reward_presses == 2 and self.last_image:
+                self.balance_after = screen.read_number(self.last_image, screen.REWARD_BALANCE)
+                self.keep_shot('reward', self.last_image)
+
+    def keep_shot(self, kind, image):
+        """Save SHOTS_DIR/<kind>-<time>.png, keeping the newest SHOTS_KEPT of the kind."""
+        try:
+            os.makedirs(SHOTS_DIR, exist_ok=True)
+            screen.save_png(os.path.join(SHOTS_DIR, '%s-%s.png' % (kind, time.strftime('%Y%m%d-%H%M%S'))), *image)
+            old = sorted(f for f in os.listdir(SHOTS_DIR) if f.startswith(kind + '-') and f.endswith('.png'))
+            for f in old[:-SHOTS_KEPT]:
+                os.remove(os.path.join(SHOTS_DIR, f))
+        except OSError as e:
+            log('WARNING: cannot keep the screenshot (%s)' % e)
 
     def check_window(self):
         for _ in range(5):
@@ -351,10 +376,11 @@ class Pilot:
                 # has hidden after a while without input, the X that brings it back can
                 # also start the race
                 refs, window = screen.references(), int(WINDOW_ID)
-                reached = menus.to_start(self.menu_press,
-                                         lambda: screen.classify(screen.capture(window), refs)[0], log,
+                reached = menus.to_start(self.menu_press, lambda: self.look(window, refs), log,
                                          30, pause=self.pause, trace=self.trace)
                 if reached == 'start/start':
+                    # the credits before the race, to tell the reward from the balance after it
+                    self.balance_before = screen.read_number(self.last_image, screen.TOP_CREDITS) or self.balance_after
                     self.press('cross', 'start')
                 elif reached == 'race':
                     log('  The race started on the X that brought back the start menu')
@@ -427,23 +453,32 @@ class Pilot:
             self.pad.stick(0.0)
 
             log('  Race ending' + result)
-            if result:
-                self.keep_race(t, time.time() - started)
+            finish, seconds = t, time.time() - started
             self.snap_every(1, 'menu')  # until the next race starts
             miles += round(LAP_MILES * LAPS, 1)
-            money += RACE_PRIZE
+            reward = None
             if result and MENUS == 'screen':
                 # look at the screen before each press: skip "1st", then through the results
                 self.pad.r2(0)
+                self.reward_presses, self.balance_after = 0, None
                 refs, window = screen.references(), int(WINDOW_ID)
-                if not menus.to_start(self.menu_press,
-                                      lambda: screen.classify(screen.capture(window), refs)[0], log,
+                if not menus.to_start(self.menu_press, lambda: self.look(window, refs), log,
                                       pause=self.pause, trace=self.trace):  # 'race': the next start finds it running
                     raise Quit(1, 'ERROR: the screens after the race did not lead back to the start screen')
+                if self.balance_before and self.balance_after and self.balance_after > self.balance_before:
+                    reward = self.balance_after - self.balance_before
+                    log('  Reward: {:,} Cr (balance {:,})'.format(reward, self.balance_after))
+                    if reward < 0.9 * RACE_PRIZE:
+                        log('  WARNING: the reward was {:,} Cr, less than RACE_PRIZE ({:,}): '
+                            'no clean race bonus?'.format(reward, RACE_PRIZE))
+                money += reward or RACE_PRIZE
                 log('  Credits: {:,}'.format(money))
                 log('  Miles: %.1f' % miles)
             else:
+                money += RACE_PRIZE
                 self.timed_menus(result, money, miles)
+            if result:
+                self.keep_race(finish, seconds, reward, self.balance_after)
 
             if MAINTENANCE_RACES > 0 and self.count % MAINTENANCE_RACES == 0:
                 log('  %d races done: check the oil and engine condition' % self.count)

@@ -181,3 +181,31 @@ def classify(image, refs):
     if name in BUTTONS:
         return '%s/%s' % (name, lit_button(image, BUTTONS[name]) or '?'), distance
     return name, distance
+
+
+# where the credits show: the top bar of the menus, and the balance on the rewards screen
+TOP_CREDITS = (352, 24, 115, 24)
+REWARD_BALANCE = (950, 278, 200, 38)
+
+
+def read_number(image, region, bright=150, scale=3):
+    """The number in a region of white digits, read by tesseract (tesseract-ocr), or
+    None without tesseract or when nothing like a number is there."""
+    width, height, rgb = image
+    x0, y0, w, h = region
+    out = bytearray()
+    for y in range(y0, y0 + h):
+        row = rgb[(y * width + x0) * 3:(y * width + x0 + w) * 3]
+        line = bytearray()
+        for r, g, b in zip(row[0::3], row[1::3], row[2::3]):
+            line += bytes([0 if (r * 299 + g * 587 + b * 114) // 1000 > bright else 255]) * scale
+        out += bytes(line) * scale
+    pgm = b'P5 %d %d 255\n' % (w * scale, h * scale) + bytes(out)
+    try:
+        result = subprocess.run(['tesseract', 'stdin', 'stdout', '--psm', '7',
+                                 '-c', 'tessedit_char_whitelist=0123456789,'],
+                                input=pgm, capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    digits = result.stdout.decode(errors='replace').strip().replace(',', '')
+    return int(digits) if digits.isdigit() else None

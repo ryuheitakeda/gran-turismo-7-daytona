@@ -30,6 +30,7 @@ SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gt7-daytona.s
 WEB_LOG = os.path.join(HOME, 'gt7-web.log')
 WEB_PORT = int(os.environ.get('WEB_PORT', '8077'))
 MAINT_LAP_PCT = float(os.environ.get('MAINT_LAP_PCT', '1.5'))
+SHOTS_DIR = os.environ.get('SHOTS_DIR', os.path.join(HOME, 'gt7-data', 'shots'))
 RUNTIME = os.environ.get('XDG_RUNTIME_DIR', '/run/user/%d' % os.getuid())
 
 FIELDS = ('time', 'on_track', 'paused', 'loading', 'lap', 'laps', 'speed', 'position',
@@ -83,7 +84,12 @@ def earnings():
             sessions[-1]['end'] = when
             if text.startswith('Race ending'):
                 position = re.search(r'\(P(\d+)', text)
-                sessions[-1]['races'].append((when, int(position.group(1)) if position else None))
+                sessions[-1]['races'].append([when, int(position.group(1)) if position else None, None])
+            elif text.startswith('Reward:') and sessions[-1]['races']:
+                # what the balance grew by, read from the screen (gt7-pilot.py with tesseract)
+                amount = re.search(r'Reward: ([\d,]+)', text)
+                if amount:
+                    sessions[-1]['races'][-1][2] = int(amount.group(1).replace(',', ''))
     now = datetime.datetime.now()
     if sessions and script_running():
         sessions[-1]['end'] = now
@@ -94,12 +100,15 @@ def earnings():
             start = max(s['start'], since) if since else s['start']
             if s['end'] > start:
                 seconds += (s['end'] - start).total_seconds()
-            for when, position in s['races']:
+            for when, position, reward in s['races']:
                 if since and when < since:
                     continue
                 races += 1
                 if position == 1:
                     wins += 1
+                if reward is not None:
+                    credits += reward
+                elif position == 1:
                     credits += s['prize']
         per_hour = credits / (seconds / 3600) if seconds >= 60 else 0
         return {'races': races, 'wins': wins, 'credits': credits, 'hours': seconds / 3600,
@@ -230,7 +239,8 @@ pre { margin: 0; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; 
       <tr><td>今日のレース数 / 1位</td><td id="today_races">–</td></tr>
       <tr><td>今日の 1時間あたり</td><td id="today_per_hour">–</td></tr>
     </table>
-    <p class="note">1位で終えたレースを、1レースあたりの賞金（1位＋クリーンレースボーナス）で数えた推定値です。</p>
+    <p class="note">画面の所持金から読めたレースはその賞金で、読めなかったレースは 1位の賞金（クリーンレースボーナス込み）で数えています。</p>
+    <img id="reward_shot" alt="" style="width:100%;border-radius:8px;margin-top:8px;display:none" onload="this.style.display='block'">
   </section>
   <section class="card">
     <h2>エンジンの状態 <span id="wear_badge" class="badge" style="margin-left:6px">–</span></h2>
@@ -321,6 +331,8 @@ async function update() {
   engine(s.engine);
 }
 update(); setInterval(update, 1000);
+const shot = () => { $('reward_shot').src = 'shot/reward?' + Date.now(); };
+shot(); setInterval(shot, 30000);
 </script>
 </body>
 </html>
@@ -329,7 +341,15 @@ update(); setInterval(update, 1000);
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path.split('?')[0] == '/api':
+        if self.path.split('?')[0] == '/shot/reward':
+            # the newest rewards screen gt7-pilot.py kept
+            try:
+                newest = max(f for f in os.listdir(SHOTS_DIR) if f.startswith('reward-') and f.endswith('.png'))
+                body, kind = open(os.path.join(SHOTS_DIR, newest), 'rb').read(), 'image/png'
+            except (OSError, ValueError):
+                self.send_error(404)
+                return
+        elif self.path.split('?')[0] == '/api':
             body, kind = json.dumps(state()).encode(), 'application/json'
         elif self.path.split('?')[0] == '/':
             body, kind = PAGE.encode(), 'text/html; charset=utf-8'

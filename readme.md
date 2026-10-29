@@ -147,6 +147,11 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - With `CURVE_STICK` above 0 it also steers left where the line bends, by that much in the sharpest bend (30 m ahead), so the tyres take more of the turn and the wall less.
 - `DRIVE=shadow` taps as usual and logs each lap's d, heading and stick, to check the line before steering by it.  The analysis table shows each lap's d against the line too.
 
+## Rewards
+
+- With `PILOT=1`, `MENUS=screen` and tesseract (`sudo apt install tesseract-ocr`), the script reads the credits in the start screen's top bar before each race, and the balance on the rewards screen once it has filled in.  The difference is the reward.  The log says "Reward: 12,780,000 Cr (balance ...)", with a warning when it's less than `RACE_PRIZE` (the clean race bonus lost to a bump, say).  Each rewards screen is kept in `SHOTS_DIR` (default `~/gt7-data/shots`, the newest 50).
+- The web page counts the credits from those rewards (`RACE_PRIZE` for races without one) and shows the newest rewards screen.
+
 ## Engine wear
 
 - With `PILOT=1` the log has each lap's time and top speed, and `RACES_FILE` gets a line per race: its laps, the median of laps 2 on, the best lap, the top speed and the way it was steered.
@@ -191,6 +196,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   - Press X twice before the first race, because the start screen hides its menu when left alone
   - Read GT7 telemetry (`PLAYSTATION_IP`): check the race started, end the race at the finish line, quit when the car is stuck, log the position and best lap
   - Web page with live telemetry and credits per hour, with start, stop-after-race and emergency stop buttons; dates in the log
+  - Read the reward from the credits before and after each race (tesseract), warn when it's short, keep the rewards screens and show the newest on the web page
   - Each lap's time and top speed in the log, a line per race in `RACES_FILE`, and a word when the laps get slower than after the last maintenance (`maintenance-done`, the web page's engine card)
   - With `PILOT=1`, drive on with taps when the car gets stuck, and only quit after `STUCK_GIVE_UP` seconds
   - Steer by the track line from the telemetry, or just log what that would do (`DRIVE`, `gt7-analyze.py track`, `gt7/driver.py`)
