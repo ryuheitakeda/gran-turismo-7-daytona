@@ -49,6 +49,7 @@ WALL_GAP = float(env('WALL_GAP', '0.3'))  # line: metres inside the wall line to
 STEER_KD = float(env('STEER_KD', '0.1'))  # line: stick per metre off the aim
 STEER_KPSI = float(env('STEER_KPSI', '1.0'))  # line: stick per radian of heading towards the wall
 STEER_MAX = float(env('STEER_MAX', '0.3'))  # line: the most stick either way
+CURVE_STICK = float(env('CURVE_STICK', '0'))  # line: left stick added in the sharpest bend (less elsewhere)
 MENU_TRACE = env('MENU_TRACE', '') == '1'  # log every press on the screens after the race
 TAPS_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.taps')  # touch it: back to taps
 LOST = 8.0  # line: metres off the line at which it gives up and taps for the rest of the race
@@ -81,7 +82,8 @@ class Pilot:
         self.line, self.taps, self.lap_log = None, DRIVE != 'line', {}
         if DRIVE in ('shadow', 'line'):
             try:
-                self.line = driver.LineDriver(driver.Track.load(), WALL_GAP, STEER_KD, STEER_KPSI, STEER_MAX)
+                self.line = driver.LineDriver(driver.Track.load(), WALL_GAP, STEER_KD, STEER_KPSI, STEER_MAX,
+                                              CURVE_STICK)
             except (OSError, ValueError, KeyError) as e:
                 log('WARNING: no track line (%s); steering with taps' % e)
                 self.taps = True

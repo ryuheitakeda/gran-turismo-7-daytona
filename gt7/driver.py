@@ -41,6 +41,13 @@ class Track:
         self.points = [tuple(p) for p in data['points']]
         self.outside = data['outside']
         self.n = len(self.points)
+        # how sharply the line bends towards the inside at each point (1/m), over +-20 m
+        n, pts, w = self.n, self.points, 10
+        head = [math.atan2(pts[(i + 1) % n][0] - pts[i][0], pts[(i + 1) % n][1] - pts[i][1]) for i in range(n)]
+        inside = 1 if sum(wrap(head[(i + 1) % n] - head[i]) for i in range(n)) > 0 else -1
+        self.curvature = [inside * wrap(head[(i + w) % n] - head[(i - w) % n]) / (2 * w * SPACING)
+                          for i in range(n)]
+        self.sharpest = max(self.curvature) or 1.0
 
     @classmethod
     def load(cls, path=TRACK):
@@ -71,10 +78,13 @@ def wrap(angle):
 
 class LineDriver:
     """Left stick from -1 (left) to 1 (right) that keeps the car gap metres inside the
-    wall line, heading along it. Steering right is towards the outside wall."""
+    wall line, heading along it. Steering right is towards the outside wall. With
+    curve, it also steers left by up to that much where the line bends (ahead
+    metres on), so the tyres take more of the turn and the wall less."""
 
-    def __init__(self, track, gap=0.3, kd=0.1, kpsi=1.0, limit=0.3):
+    def __init__(self, track, gap=0.3, kd=0.1, kpsi=1.0, limit=0.3, curve=0.0, ahead=30.0):
         self.track, self.gap, self.kd, self.kpsi, self.limit = track, gap, kd, kpsi, limit
+        self.curve, self.ahead = curve, int(ahead / SPACING)
         self.hint = None
         self.d = self.psi = self.stick = 0.0
 
@@ -87,5 +97,7 @@ class LineDriver:
         if math.hypot(vx, vz) > 3:
             self.psi = wrap(math.atan2(vx, vz) - heading) * -self.track.outside
         error = self.d + self.gap  # + when nearer the wall than wanted
-        self.stick = max(-self.limit, min(self.limit, -(self.kd * error + self.kpsi * self.psi)))
+        bend = max(0.0, self.track.curvature[(self.hint + self.ahead) % self.track.n]) / self.track.sharpest
+        stick = -(self.kd * error + self.kpsi * self.psi) - self.curve * bend
+        self.stick = max(-self.limit, min(self.limit, stick))
         return self.stick

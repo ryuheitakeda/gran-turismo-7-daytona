@@ -96,7 +96,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - `QUICKPRESS_LENGTH` (default 0.01) and `KEYPRESS_LENGTH` (default 0.08): how long the steering taps and the menu presses last, in seconds.  For a steering tap the window is looked up again before the key is released, which adds about 0.04 seconds; the steering is tuned with that included.  Menu presses last exactly `KEYPRESS_LENGTH`: held longer, GT7 can move the cursor twice.
 - `WINDOW_NAME` (default `^Chiaki \| Stream$`): the Chiaki stream window title as an xdotool regular expression (case-insensitive).
 - `ANALOG_L__R`, `DPAD_L`, `DPAD_R`, `KEY_O`, `KEY_R2`, `KEY_X`: keys that MUST match your Chiaki key config.  The defaults are Chiaki's default keys.
-- `DRIVE` (default pwm): with `PILOT=1`, how to steer: `pwm` (taps like the keys), `shadow` (taps, and log for each lap what `line` would do) or `line` (steer by the track line, see "Steering by the line").  `WALL_GAP` (default 0.3), `STEER_KD` (0.1), `STEER_KPSI` (1.0) and `STEER_MAX` (0.3) tune `line`.
+- `DRIVE` (default pwm): with `PILOT=1`, how to steer: `pwm` (taps like the keys), `shadow` (taps, and log for each lap what `line` would do) or `line` (steer by the track line, see "Steering by the line").  `WALL_GAP` (default 0.3), `STEER_KD` (0.1), `STEER_KPSI` (1.0), `STEER_MAX` (0.3) and `CURVE_STICK` (0) tune `line`.
 - `MENUS` (default auto): how to get through the screens after the race: `screen` (look at the screen before each press, see "Screens"), `timer` (press on a timer), or `auto`: `screen` once the screens are learned.  The "Started:" log line says which.
 - `LOG_FILE` (default `~/gt7-daytona.log`) and `LOCK_FILE` (default `~/.cache/gt7-daytona.lock`): used by the background commands below.
 
@@ -143,6 +143,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - The taps keep the car against the outside wall all the way round: the recordings show the same line every lap to within a few centimetres, with the steering pulled towards the wall 90% of the time.  That rubbing is where most of the speed goes.
 - `./gt7-analyze.py track <recording.gt7tel> [lap]` saves the line of a lap (default the fastest from lap 2 on) as the track line, `~/.config/gt7-daytona/track.json` (`TRACK`).
 - With `PILOT=1 DRIVE=line` the car's position is projected onto the line 60 times a second.  The left stick is set to keep the car `WALL_GAP` metres inside the line, heading along it: `-(STEER_KD × (d + WALL_GAP) + STEER_KPSI × heading)` within `±STEER_MAX`.  Here d is the distance towards the wall in metres and heading the angle towards it in radians.  More than 8 m off the line (after a collision, say), it taps for the rest of the race.
+- With `CURVE_STICK` above 0 it also steers left where the line bends, by that much in the sharpest bend (30 m ahead), so the tyres take more of the turn and the wall less.
 - `DRIVE=shadow` taps as usual and logs each lap's d, heading and stick, to check the line before steering by it.  The analysis table shows each lap's d against the line too.
 
 ## Virtual gamepad

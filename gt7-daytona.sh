@@ -46,6 +46,7 @@ START_TIMEOUT=${START_TIMEOUT:-15} # with telemetry, quit if the car isn't on tr
 STUCK_SPEED=${STUCK_SPEED:-30} # with telemetry, km/h below which the car counts as stuck
 STUCK_TIME=${STUCK_TIME:-5} # with telemetry, quit after being stuck this many seconds
 STRAIGHT_TIME=${STRAIGHT_TIME:-15} # seconds to drive straight after the start to avoid hitting cars ahead
+CURVE_STICK=${CURVE_STICK:-0} # with DRIVE=line, left stick added in the sharpest bend, less in gentler ones
 STEER_KD=${STEER_KD:-0.1} # with DRIVE=line, stick per metre off the aim
 STEER_KPSI=${STEER_KPSI:-1.0} # with DRIVE=line, stick per radian of heading towards the wall
 STEER_MAX=${STEER_MAX:-0.3} # with DRIVE=line, the most stick either way (1 is full lock)
@@ -301,7 +302,7 @@ if [ "$PILOT" = 1 ]; then
   export PLAYSTATION_IP TELEMETRY_FILE TELEMETRY_RECORD SCREEN_DIR WINDOW_ID WINDOW_NAME STOP_FILE PAD MENUS \
     KEYPRESS_LENGTH FINISH_WAIT RACE_PRIZE RACE_TIME START_TIMEOUT STUCK_SPEED STUCK_TIME STRAIGHT_TIME \
     MAINTENANCE_RACES LAPS LAP_MILES TAP_LENGTH TAP_INTERVAL DRIVE WALL_GAP STEER_KD STEER_KPSI STEER_MAX \
-    MENU_TRACE DPAD_LENGTH
+    MENU_TRACE DPAD_LENGTH CURVE_STICK
   "$(dirname "$0")/gt7-pilot.py" 9>&- &
   status=0
   wait $! || status=$?
