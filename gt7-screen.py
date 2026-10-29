@@ -46,7 +46,7 @@ def main():
     parser.add_argument('--check', action='store_true', help='to-start: only check the references')
     parser.add_argument('--timeout', type=float, default=150, help='to-start: give up after these seconds')
     parser.add_argument('args', nargs='*')
-    args = parser.parse_args()
+    args = parser.parse_intermixed_args()  # options may come between the command and its arguments
     a = args.args
 
     if args.command == 'snap' and len(a) == 1:

@@ -48,6 +48,7 @@ WALL_GAP = float(env('WALL_GAP', '0.3'))  # line: metres inside the wall line to
 STEER_KD = float(env('STEER_KD', '0.1'))  # line: stick per metre off the aim
 STEER_KPSI = float(env('STEER_KPSI', '1.0'))  # line: stick per radian of heading towards the wall
 STEER_MAX = float(env('STEER_MAX', '0.3'))  # line: the most stick either way
+MENU_TRACE = env('MENU_TRACE', '') == '1'  # log every press on the screens after the race
 LOST = 8.0  # line: metres off the line at which it gives up and taps for the rest of the race
 
 
@@ -149,6 +150,10 @@ class Pilot:
                     time.sleep(0.02)
         except (OSError, TypeError):
             pass  # the pad was closed on the way out
+
+    def trace(self, name, button):
+        if MENU_TRACE:
+            log('    (%s on %s)' % (button, name))
 
     def check_window(self):
         for _ in range(5):
@@ -261,7 +266,7 @@ class Pilot:
                 refs, window = screen.references(), int(WINDOW_ID)
                 reached = menus.to_start(lambda button: self.pad.press(button, KEYPRESS_LENGTH),
                                          lambda: screen.classify(screen.capture(window), refs)[0], log,
-                                         30, pause=self.pause)
+                                         30, pause=self.pause, trace=self.trace)
                 if reached == 'start/start':
                     self.press('cross', 'start')
                 elif reached == 'race':
@@ -335,7 +340,7 @@ class Pilot:
                 refs, window = screen.references(), int(WINDOW_ID)
                 if not menus.to_start(lambda button: self.pad.press(button, KEYPRESS_LENGTH),
                                       lambda: screen.classify(screen.capture(window), refs)[0], log,
-                                      pause=self.pause):  # 'race': the next start finds it running
+                                      pause=self.pause, trace=self.trace):  # 'race': the next start finds it running
                     raise Quit(1, 'ERROR: the screens after the race did not lead back to the start screen')
                 log('  Credits: {:,}'.format(money))
                 log('  Miles: %.1f' % miles)
