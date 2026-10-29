@@ -148,7 +148,7 @@ class Receiver:
 
     def run(self, keep_going):
         kind = HEARTBEAT
-        last_heartbeat = last_write = 0
+        last_heartbeat = last_write = reported = 0
         finished = False
         counter = Counter()
         record = None
@@ -187,8 +187,10 @@ class Receiver:
                 if self.on_packet:
                     self.on_packet(t)
                 if t['laps'] > 0 and t['lap'] > t['laps']:
-                    if not finished:
+                    # once a race: the replay after it runs the laps again
+                    if not finished and now - reported > 120:
                         counter.report(kind)
+                        reported = now
                     finished = True
                 else:
                     finished = False
