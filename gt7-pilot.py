@@ -379,8 +379,9 @@ class Pilot:
                 reached = menus.to_start(self.menu_press, lambda: self.look(window, refs), log,
                                          30, pause=self.pause, trace=self.trace)
                 if reached == 'start/start':
-                    # the credits before the race, to tell the reward from the balance after it
-                    self.balance_before = screen.read_number(self.last_image, screen.TOP_CREDITS) or self.balance_after
+                    # the credits before the race, to tell the reward from the balance after it: the
+                    # last rewards screen's balance (big digits) or, first, the top bar's (small, misread more)
+                    self.balance_before = self.balance_after or screen.read_number(self.last_image, screen.TOP_CREDITS)
                     self.press('cross', 'start')
                 elif reached == 'race':
                     log('  The race started on the X that brought back the start menu')
@@ -466,7 +467,8 @@ class Pilot:
                                       pause=self.pause, trace=self.trace, after_race=True):
                     # ('race' after the screens after it: the next start finds it running)
                     raise Quit(1, 'ERROR: the screens after the race did not lead back to the start screen')
-                if self.balance_before and self.balance_after and self.balance_after > self.balance_before:
+                if self.balance_before and self.balance_after and \
+                        0 < self.balance_after - self.balance_before <= 1.2 * RACE_PRIZE:
                     reward = self.balance_after - self.balance_before
                     log('  Reward: {:,} Cr (balance {:,})'.format(reward, self.balance_after))
                     if reward < 0.9 * RACE_PRIZE:
