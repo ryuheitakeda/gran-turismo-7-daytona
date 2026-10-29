@@ -95,7 +95,8 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - `SCREEN_RECORD` (default empty): a directory to keep screenshots of the Chiaki window in: one before each menu press, named after the step, one a second from the finish to the next start, and one every 30 seconds during the race.  It needs `xwd` (`sudo apt install x11-apps`).
 - `QUICKPRESS_LENGTH` (default 0.01) and `KEYPRESS_LENGTH` (default 0.08): how long the steering taps and the menu presses last, in seconds.  For a steering tap the window is looked up again before the key is released, which adds about 0.04 seconds; the steering is tuned with that included.  Menu presses last exactly `KEYPRESS_LENGTH`: held longer, GT7 can move the cursor twice.
 - `WINDOW_NAME` (default `^Chiaki \| Stream$`): the Chiaki stream window title as an xdotool regular expression (case-insensitive).
-- `ANALOG_L__R`, `DPAD_R`, `KEY_R2`, `KEY_X`: keys that MUST match your Chiaki key config.  The defaults are Chiaki's default keys.
+- `ANALOG_L__R`, `DPAD_L`, `DPAD_R`, `KEY_O`, `KEY_R2`, `KEY_X`: keys that MUST match your Chiaki key config.  The defaults are Chiaki's default keys.
+- `MENUS` (default auto): how to get through the screens after the race: `screen` (look at the screen before each press, see "Screens"), `timer` (press on a timer), or `auto`: `screen` once the screens are learned.  The "Started:" log line says which.
 - `LOG_FILE` (default `~/gt7-daytona.log`) and `LOCK_FILE` (default `~/.cache/gt7-daytona.lock`): used by the background commands below.
 
 ## Directions
@@ -127,6 +128,14 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - To see where a race loses time, record it, e.g. `TELEMETRY_RECORD=~/gt7-data/telemetry SCREEN_RECORD=~/gt7-data/frames ./gt7-daytona.sh start`.  Nothing is recorded unless these are set.
 - `./gt7-analyze.py <recording.gt7tel>` needs [uv](https://docs.astral.sh/uv/), which installs matplotlib for it.  For each lap it prints the lap time, the top and average speed, the steering, and "scrape": the share of the lap at full throttle while losing speed, a rough sign of rubbing the wall.  It saves charts next to the recording: the line driven coloured by speed, the speed over each lap, and the steering over 20 seconds.
 - `./gt7-screen.py snap <file.png>` saves a screenshot of the Chiaki stream window, and `./gt7-screen.py record --every 1 <dir> <label>` keeps saving them.  They show the game only on a display Chiaki draws its video on; on Chrome Remote Desktop's virtual display they show Chiaki's host list.
+
+## Screens
+
+- With Chiaki on a display that shows its video, the script looks at the screen after the race instead of pressing on a timer.  It skips the "1st" scene after the finish line, goes through the results and the replay, and moves the cursor to Retry from wherever it is, pressing only when the screen it expects is showing.  That's about 45 seconds quicker per race, and a press that GT7 misses no longer leaves the menus out of step.
+- Teach it the screens once, from screenshots of your own (e.g. a race with `SCREEN_RECORD` set): `./gt7-screen.py learn <screen> <file.png>` for each of `start` (the start screen, cursor on Start), `finish` ("1st" after the finish line), `standings`, `rewards`, `replay` (the replay without its menu), `replay-menu` (with it), `result` (the race result), `result-menu` (the Replay button's menu open on it) and `race`.  `./gt7-screen.py classify <dir>` shows what it makes of a folder of screenshots, and `./gt7-screen.py classify` of the window now.
+- The references go to `~/.config/gt7-daytona/screens` (`SCREEN_REFERENCES`).  They are not in this repository, because they are pictures of the game.
+- A screen is told by its titles, buttons and hints: their white pixels are compared with the reference, so the moving 3D background behind some of them doesn't count.  The button the cursor is on is told by its white edge.
+- If the screens after the race don't lead back to the start screen within 150 seconds, the script logs an error and quits.
 
 ## Virtual gamepad
 
@@ -166,6 +175,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
   - Press X twice before the first race, because the start screen hides its menu when left alone
   - Read GT7 telemetry (`PLAYSTATION_IP`): check the race started, end the race at the finish line, quit when the car is stuck, log the position and best lap
   - Web page with live telemetry and credits per hour, with start, stop-after-race and emergency stop buttons; dates in the log
+  - Go through the screens after the race by looking at them, skipping the scene after the finish (`MENUS`, `gt7-screen.py learn`, `classify`, `to-start`)
   - Fix the presses after the race for the current GT7 (two X fewer, so it no longer goes back into the replay) and hold each menu key exactly `KEYPRESS_LENGTH`
   - A virtual gamepad (`gt7/pad.py`, `gt7-pad.py`, `70-gt7-pad.rules`) to send analog values to Chiaki
   - Record every telemetry packet and screenshots of each menu step for analysis (`TELEMETRY_RECORD`, `SCREEN_RECORD`, `gt7-analyze.py`, `gt7-screen.py`); read the steering angle (heartbeat B) and log the packets received and lost per race

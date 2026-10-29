@@ -32,6 +32,7 @@ LOCK_FILE=${LOCK_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.lock}
 LOG_FILE=${LOG_FILE:-$HOME/gt7-daytona.log}
 STOP_FILE=${STOP_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.stop-after-race}
 MAINTENANCE_RACES=${MAINTENANCE_RACES:-20} # remind to check the engine every N races, 0 to turn off
+MENUS=${MENUS:-auto} # after the race: screen (look before each press), timer, or auto (screen once learned)
 PAD=${PAD:-uinput} # with PILOT=1: uinput for the virtual gamepad, dry to only log it (tests)
 PILOT=${PILOT:-0} # 1: race with gt7-pilot.py and the virtual gamepad instead of the loop below
 PLAYSTATION_IP=${PLAYSTATION_IP:-} # set to read GT7 telemetry: detect the start, the finish and a stuck car
@@ -53,8 +54,10 @@ WINDOW_NAME=${WINDOW_NAME:-'^Chiaki \| Stream$'} # xdotool regex, case-insensiti
 # Key config MUST be set to match your Chiaki key config
 
 ANALOG_L__R=${ANALOG_L__R:-bracketright} # default ']' Left analog pressing right
+DPAD_L=${DPAD_L:-Left}                   # default 'Left'
 DPAD_R=${DPAD_R:-Right}                  # default 'Right'
 KEY_R2=${KEY_R2:-4}                      # default '4'
+KEY_O=${KEY_O:-BackSpace}                # default 'Backspace' (circle)
 KEY_X=${KEY_X:-Return}                   # default 'Return'
 
 # ---------- functions ----------
@@ -145,7 +148,7 @@ lap_time() { # format milliseconds as m:ss.sss
 }
 
 release_all() {
-  for key in "$ANALOG_L__R" "$DPAD_R" "$KEY_R2" "$KEY_X"; do
+  for key in "$ANALOG_L__R" "$DPAD_L" "$DPAD_R" "$KEY_O" "$KEY_R2" "$KEY_X"; do
     xdotool search --name "$WINDOW_NAME" keyup "$key" 2>/dev/null || true
   done
 }
@@ -267,7 +270,15 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-log "Started: RACE_TIME=$RACE_TIME STRAIGHT_TIME=$STRAIGHT_TIME RACE_PRIZE=$RACE_PRIZE display=$DISPLAY window=$WINDOW_ID"
+if [ "$MENUS" = auto ]; then
+  if "$(dirname "$0")/gt7-screen.py" to-start --check 2>/dev/null; then
+    MENUS=screen
+  else
+    MENUS=timer
+  fi
+fi
+
+log "Started: RACE_TIME=$RACE_TIME STRAIGHT_TIME=$STRAIGHT_TIME RACE_PRIZE=$RACE_PRIZE display=$DISPLAY window=$WINDOW_ID menus=$MENUS"
 
 if [ -n "$SCREEN_RECORD" ]; then
   SCREEN_DIR=$SCREEN_RECORD/$(date +%Y%m%d-%H%M%S)
@@ -282,7 +293,7 @@ if [ "$PILOT" = 1 ]; then
     exit 1
   fi
   TELEMETRY_FILE=${XDG_RUNTIME_DIR:-/tmp}/gt7-telemetry.state # read by gt7-web.py
-  export PLAYSTATION_IP TELEMETRY_FILE TELEMETRY_RECORD SCREEN_DIR WINDOW_ID WINDOW_NAME STOP_FILE PAD \
+  export PLAYSTATION_IP TELEMETRY_FILE TELEMETRY_RECORD SCREEN_DIR WINDOW_ID WINDOW_NAME STOP_FILE PAD MENUS \
     KEYPRESS_LENGTH FINISH_WAIT RACE_PRIZE RACE_TIME START_TIMEOUT STUCK_SPEED STUCK_TIME STRAIGHT_TIME \
     MAINTENANCE_RACES LAPS LAP_MILES TAP_LENGTH TAP_INTERVAL
   "$(dirname "$0")/gt7-pilot.py" 9>&- &
@@ -388,46 +399,57 @@ do
 
   log "  Race ending$result"
   snap_every 1 menu # until the next race starts
-  if [ -n "$result" ]; then
-    # telemetry saw the car cross the line, so no buffer for a late finish is needed
-    release $KEY_R2
-    pause $FINISH_WAIT
-    log 'Standings'
-  else
-    pause 30
-    release $KEY_R2
-
-    log 'Standings'
-    pause 20 # extra wait here to buffer for slow finishes
-  fi
-  press $KEY_X standings
-
-  log 'Rewards'
-  press $KEY_X rewards
-  pause 3
-
   current_miles=$(awk -v a="$current_miles" -v b="$RACE_MILES" 'BEGIN { printf "%.1f", a + b }')
   current_money=$((current_money + RACE_PRIZE))
+  if [ -n "$result" ] && [ "$MENUS" = screen ]; then
+    # look at the screen before each press: skip "1st", then through the results
+    release $KEY_R2
+    if ! "$(dirname "$0")/gt7-screen.py" to-start --id "$WINDOW_ID" \
+         --keys "$KEY_X,$KEY_O,$DPAD_L,$DPAD_R" 9>&-; then
+      log 'ERROR: the screens after the race did not lead back to the start screen'
+      exit 1
+    fi
+    log "$(printf "  Credits: %'d" $current_money)"
+    log "  Miles: $current_miles"
+  else
+    if [ -n "$result" ]; then
+      # telemetry saw the car cross the line, so no buffer for a late finish is needed
+      release $KEY_R2
+      pause $FINISH_WAIT
+      log 'Standings'
+    else
+      pause 30
+      release $KEY_R2
 
-  log "$(printf "  Credits: %'d" $current_money)"
-  press $KEY_X credits
-  pause 2
+      log 'Standings'
+      pause 20 # extra wait here to buffer for slow finishes
+    fi
+    press $KEY_X standings
 
-  log "  Miles: $current_miles"
-  press $KEY_X miles
-  pause 4
+    log 'Rewards'
+    press $KEY_X rewards
+    pause 3
 
-  log 'Replay'
-  press $KEY_X replay1 # the replay's menu, with the cursor on Exit
-  pause 4
-  press $KEY_X replay2 # Exit: the race result with Replay, Retry and Exit
-  pause 4
+    log "$(printf "  Credits: %'d" $current_money)"
+    press $KEY_X credits
+    pause 2
 
-  log 'Retry'
-  press $DPAD_R retry-right # from Replay to Retry
-  pause 1
-  press $KEY_X retry-x
-  pause 4
+    log "  Miles: $current_miles"
+    press $KEY_X miles
+    pause 4
+
+    log 'Replay'
+    press $KEY_X replay1 # the replay's menu, with the cursor on Exit
+    pause 4
+    press $KEY_X replay2 # Exit: the race result with Replay, Retry and Exit
+    pause 4
+
+    log 'Retry'
+    press $DPAD_R retry-right # from Replay to Retry
+    pause 1
+    press $KEY_X retry-x
+    pause 4
+  fi
 
   if [ "$MAINTENANCE_RACES" -gt 0 ] && [ $((race_count % MAINTENANCE_RACES)) -eq 0 ]; then
     log "  $race_count races done: check the oil and engine condition"

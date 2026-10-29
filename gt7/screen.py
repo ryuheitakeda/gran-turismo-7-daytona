@@ -1,12 +1,47 @@
-# Capture the Chiaki stream window and save it as PNG, with nothing but xwd
-# (x11-apps) and python3's standard library. xwd doesn't grab the X server.
+# Capture the Chiaki stream window, save it as PNG and tell which GT7 screen it
+# shows, with nothing but xwd (x11-apps) and python3's standard library. xwd
+# doesn't grab the X server.
+#
+# A screen is told by parts of the picture that don't move (titles, buttons,
+# hints): their bright pixels (the white text), taken every other pixel, are
+# compared with references learned from screenshots of this machine
+# (gt7-screen.py learn). Only the text counts, so the moving 3D background
+# behind some titles doesn't. The references stay out of the repository: they
+# are pictures of the game.
 
+import json
 import os
 import struct
 import subprocess
 import zlib
 
 WINDOW_NAME = os.environ.get('WINDOW_NAME', r'^Chiaki \| Stream$')
+REFERENCES = os.environ.get('SCREEN_REFERENCES',
+                            os.path.expanduser('~/.config/gt7-daytona/screens'))
+WIDTH, HEIGHT = 1280, 720  # the regions below are for this size
+
+# name: regions (x, y, width, height[, brightness]) that only this screen has, as seen on
+# GT7 in 2026-10; brightness is the grey above which a pixel counts as text (default BRIGHT)
+SCREENS = {
+    'start': [(20, 62, 140, 46), (480, 530, 320, 30)],  # title, laps and start type
+    'finish': [(575, 310, 130, 100, 215), (600, 676, 80, 28)],  # "1st" (white, not the yellow line), "x next"
+    'standings': [(485, 30, 330, 72), (600, 676, 80, 28)],  # logo and title, "x next"
+    'rewards': [(100, 318, 290, 58), (600, 658, 80, 28)],  # REWARDS, "x next"
+    'replay': [(1060, 636, 200, 60, 95)],  # GRAN TURISMO 7 in the corner (faint), without the replay bar
+    'replay-menu': [(40, 628, 170, 80), (1165, 640, 85, 56)],  # hints, Exit lit
+    'result': [(140, 92, 300, 32)],  # RACE RESULT
+    'result-menu': [(385, 550, 220, 150)],  # the Replay button's menu, over the race result
+    'race': [(85, 28, 70, 20), (195, 28, 35, 20)],  # POSITION and LAP over the race
+}
+# x ranges of the buttons along the bottom; the one the cursor is on has a white edge
+BUTTONS = {
+    'start': {'start': (225, 375), 'replay': (425, 575), 'settings': (625, 775),
+              'options': (820, 870), 'shop': (915, 965), 'exit': (1005, 1060)},
+    'result': {'replay': (420, 565), 'retry': (620, 765), 'exit': (815, 865)},
+}
+LIT = 170  # grey of a lit button edge (about 215); unlit ones are 45-110
+BRIGHT = 160  # grey above which a pixel counts as text
+MATCH = 20  # percent of the text pixels that may differ for a screen to count as seen
 
 
 def find_window(name=WINDOW_NAME):
@@ -51,3 +86,94 @@ def save_png(path, width, height, rgb):
     with open(path + '.tmp', 'wb') as f:
         f.write(png(width, height, rgb))
     os.replace(path + '.tmp', path)
+
+
+def load_png(path):
+    """(width, height, RGB bytes) of a PNG saved by save_png (8-bit RGB, no filters)."""
+    data = open(path, 'rb').read()
+    width, height = struct.unpack('>II', data[16:24])
+    idat, pos = b'', 8
+    while pos < len(data):
+        size, kind = struct.unpack('>I4s', data[pos:pos + 8])
+        if kind == b'IDAT':
+            idat += data[pos + 8:pos + 8 + size]
+        pos += 12 + size
+    raw = zlib.decompress(idat)
+    stride = width * 3 + 1
+    return width, height, b''.join(raw[y * stride + 1:(y + 1) * stride] for y in range(height))
+
+
+def grey(image, region, step=4):
+    """The region of a (width, height, RGB) image, every step-th pixel, in grey."""
+    width, height, rgb = image
+    x, y, w, h = region
+    out = []
+    for row in range(y, min(y + h, height), step):
+        line = rgb[(row * width + x) * 3:(row * width + min(x + w, width)) * 3]
+        out += [(r * 299 + g * 587 + b * 114) // 1000
+                for r, g, b in zip(line[0::3 * step], line[1::3 * step], line[2::3 * step])]
+    return out
+
+
+def text(image, region):
+    """The region's pixels as 1 (bright: text) or 0, every other pixel."""
+    bright = region[4] if len(region) > 4 else BRIGHT
+    return [int(v > bright) for v in grey(image, region[:4], 2)]
+
+
+def learn(name, image, directory=REFERENCES):
+    if image[0] != WIDTH or image[1] != HEIGHT:
+        raise ValueError('the screenshot is %dx%d, not %dx%d' % (image[0], image[1], WIDTH, HEIGHT))
+    os.makedirs(directory, exist_ok=True)
+    with open(os.path.join(directory, name + '.json'), 'w') as f:
+        json.dump([text(image, region) for region in SCREENS[name]], f)
+
+
+def references(directory=REFERENCES):
+    refs = {}
+    for name in SCREENS:
+        try:
+            refs[name] = json.load(open(os.path.join(directory, name + '.json')))
+        except OSError:
+            pass
+    return refs
+
+
+def distances(image, refs):
+    """For each learned screen, the percent of text pixels that differ, smallest first.
+    Pixels dark in both don't count; with no text on either side nothing matches."""
+    out = []
+    for name, ref in refs.items():
+        differ = lit = 0
+        for region, expected in zip(SCREENS[name], ref):
+            for a, b in zip(text(image, region), expected):
+                differ += a != b
+                lit += a or b
+        out.append((100 * differ / lit if lit else 100.0, name))
+    return sorted(out)
+
+
+def lit_button(image, buttons):
+    """The button with the white edge of the cursor, or None."""
+    for name, (x0, x1) in buttons.items():
+        if max(sum(v) / len(v) for v in (grey(image, (x0, y, x1 - x0, 1), 2) for y in range(640, 650))) > LIT:
+            return name
+    return None
+
+
+def classify(image, refs):
+    """The screen the image shows, with the distance: e.g. 'rewards', 'result/retry'
+    (the race result with the cursor on Retry), 'result/menu' (the Replay menu is
+    open), 'start/start' or 'unknown'."""
+    if image[0] != WIDTH or image[1] != HEIGHT:
+        return 'unknown', 255.0
+    best = distances(image, {k: v for k, v in refs.items() if k != 'result-menu'})
+    if not best or best[0][0] >= MATCH:
+        return 'unknown', best[0][0] if best else 255.0
+    distance, name = best[0]
+    if name == 'result' and 'result-menu' in refs and \
+            distances(image, {'result-menu': refs['result-menu']})[0][0] < MATCH:
+        return 'result/menu', distance
+    if name in BUTTONS:
+        return '%s/%s' % (name, lit_button(image, BUTTONS[name]) or '?'), distance
+    return name, distance

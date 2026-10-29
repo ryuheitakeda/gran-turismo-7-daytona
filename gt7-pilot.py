@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 
-from gt7 import pad, screen, telemetry
+from gt7 import menus, pad, screen, telemetry
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 env = os.environ.get
@@ -41,6 +41,7 @@ LAPS = int(env('LAPS', '10'))
 LAP_MILES = float(env('LAP_MILES', '2.6'))
 TAP_LENGTH = float(env('TAP_LENGTH', '0.053'))  # the key taps measured on :0
 TAP_INTERVAL = float(env('TAP_INTERVAL', '0.58'))
+MENUS = env('MENUS', 'timer')  # screen: look at the screen before each press after the race
 
 
 def log(text):
@@ -162,6 +163,44 @@ class Pilot:
             log('WARNING: no telemetry from %s (is UDP port 33740 open?); timing the race with RACE_TIME'
                 % PLAYSTATION_IP)
 
+    def timed_menus(self, result, money, miles):
+        """The presses after the race on a timer, for when the screens aren't learned."""
+        if result:
+            # telemetry saw the car cross the line, so no buffer for a late finish is needed
+            self.pad.r2(0)
+            self.pause(FINISH_WAIT)
+            log('Standings')
+        else:
+            self.pause(30)
+            self.pad.r2(0)
+            log('Standings')
+            self.pause(20)  # extra wait here to buffer for slow finishes
+        self.press('cross', 'standings')
+
+        log('Rewards')
+        self.press('cross', 'rewards')
+        self.pause(3)
+
+        log('  Credits: {:,}'.format(money))
+        self.press('cross', 'credits')
+        self.pause(2)
+
+        log('  Miles: %.1f' % miles)
+        self.press('cross', 'miles')
+        self.pause(4)
+
+        log('Replay')
+        self.press('cross', 'replay1')  # the replay's menu, with the cursor on Exit
+        self.pause(4)
+        self.press('cross', 'replay2')  # Exit: the race result with Replay, Retry and Exit
+        self.pause(4)
+
+        log('Retry')
+        self.press('right', 'retry-right')  # from Replay to Retry
+        self.pause(1)
+        self.press('cross', 'retry-x')
+        self.pause(4)
+
     def race(self):
         self.count = 0
         money, miles = 0, 0.0
@@ -231,43 +270,20 @@ class Pilot:
 
             log('  Race ending' + result)
             self.snap_every(1, 'menu')  # until the next race starts
-            if result:
-                # telemetry saw the car cross the line, so no buffer for a late finish is needed
-                self.pad.r2(0)
-                self.pause(FINISH_WAIT)
-                log('Standings')
-            else:
-                self.pause(30)
-                self.pad.r2(0)
-                log('Standings')
-                self.pause(20)  # extra wait here to buffer for slow finishes
-            self.press('cross', 'standings')
-
-            log('Rewards')
-            self.press('cross', 'rewards')
-            self.pause(3)
-
             miles += round(LAP_MILES * LAPS, 1)
             money += RACE_PRIZE
-            log('  Credits: {:,}'.format(money))
-            self.press('cross', 'credits')
-            self.pause(2)
-
-            log('  Miles: %.1f' % miles)
-            self.press('cross', 'miles')
-            self.pause(4)
-
-            log('Replay')
-            self.press('cross', 'replay1')  # the replay's menu, with the cursor on Exit
-            self.pause(4)
-            self.press('cross', 'replay2')  # Exit: the race result with Replay, Retry and Exit
-            self.pause(4)
-
-            log('Retry')
-            self.press('right', 'retry-right')  # from Replay to Retry
-            self.pause(1)
-            self.press('cross', 'retry-x')
-            self.pause(4)
+            if result and MENUS == 'screen':
+                # look at the screen before each press: skip "1st", then through the results
+                self.pad.r2(0)
+                refs, window = screen.references(), int(WINDOW_ID)
+                if not menus.to_start(lambda button: self.pad.press(button, KEYPRESS_LENGTH),
+                                      lambda: screen.classify(screen.capture(window), refs)[0], log,
+                                      pause=self.pause):
+                    raise Quit(1, 'ERROR: the screens after the race did not lead back to the start screen')
+                log('  Credits: {:,}'.format(money))
+                log('  Miles: %.1f' % miles)
+            else:
+                self.timed_menus(result, money, miles)
 
             if MAINTENANCE_RACES > 0 and self.count % MAINTENANCE_RACES == 0:
                 log('  %d races done: check the oil and engine condition' % self.count)
