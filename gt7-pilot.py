@@ -31,6 +31,9 @@ WINDOW_NAME = env('WINDOW_NAME', screen.WINDOW_NAME)
 STOP_FILE = env('STOP_FILE', os.path.expanduser('~/.cache/gt7-daytona.stop-after-race'))
 KEYPRESS_LENGTH = float(env('KEYPRESS_LENGTH', '0.08'))
 DPAD_LENGTH = float(env('DPAD_LENGTH', '0.08'))  # held longer, GT7 moves the cursor twice
+MENU_KEYS = env('MENU_KEYS', '1') == '1'  # press the menus with the keys (xdotool): the pad's presses get lost there
+KEYS = {'cross': env('KEY_X', 'Return'), 'circle': env('KEY_O', 'BackSpace'),
+        'left': env('DPAD_L', 'Left'), 'right': env('DPAD_R', 'Right')}
 FINISH_WAIT = float(env('FINISH_WAIT', '8'))
 RACE_PRIZE = int(env('RACE_PRIZE', '9705000'))
 RACE_TIME = float(env('RACE_TIME', '800'))
@@ -240,7 +243,12 @@ class Pilot:
                     state['percent'], lap_time(round(1000 * state['now'])), lap_time(round(1000 * state['base']))))
 
     def menu_press(self, button):
-        self.pad.press(button, DPAD_LENGTH if button in pad.DPAD else KEYPRESS_LENGTH)
+        if MENU_KEYS and WINDOW_ID and button in KEYS and not isinstance(self.pad, pad.DryPad):
+            # one xdotool, so the key is held exactly 0.08 s (longer, GT7 moves the cursor twice)
+            subprocess.run(['xdotool', 'keydown', '--window', WINDOW_ID, KEYS[button], 'sleep', '0.08',
+                            'keyup', '--window', WINDOW_ID, KEYS[button]], check=False)
+        else:
+            self.pad.press(button, DPAD_LENGTH if button in pad.DPAD else KEYPRESS_LENGTH)
 
     def look(self, window, refs):
         self.last_image = screen.capture(window)
