@@ -51,6 +51,8 @@ STEER_KPSI = float(env('STEER_KPSI', '1.0'))  # line: stick per radian of headin
 STEER_MAX = float(env('STEER_MAX', '0.3'))  # line: the most stick either way
 CURVE_STICK = float(env('CURVE_STICK', '0'))  # line: left stick added in the sharpest bend (less elsewhere)
 MENU_TRACE = env('MENU_TRACE', '') == '1'  # log every press on the screens after the race
+STEER_PROBE = env('STEER_PROBE', '') == '1'  # line: find the stick's dead zone once, on lap 3's back straight
+PROBE_FROM, PROBE_TO, PROBE_MAX = 1700, 2300, 0.3  # metres along the line, and the stick it ramps up to (right)
 TAPS_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.taps')  # touch it: back to taps
 LOST = 8.0  # line: metres off the line at which it gives up and taps for the rest of the race
 
@@ -144,6 +146,8 @@ class Pilot:
         lap['psi'] += self.line.psi
         lap['stick'] += stick
         lap['dmin'], lap['dmax'] = min(lap['dmin'], self.line.d), max(lap['dmax'], self.line.d)
+        if DRIVE == 'line' and self.steering and not self.taps and self.probe(t):
+            return
         if DRIVE == 'line' and self.steering and not self.taps:
             if t['packet_id'] % 30 == 0 and os.path.exists(TAPS_FILE):
                 self.taps = True
@@ -153,6 +157,29 @@ class Pilot:
                 log('WARNING: %.1f m off the track line; steering with taps for the rest of the race' % self.line.d)
             else:
                 self.pad.stick(stick)
+
+    def probe(self, t):
+        """With STEER_PROBE, on lap 3's back straight ramp the stick from 0 to PROBE_MAX to
+        the right (into the wall the car rides, away from the cars inside) and log at what
+        stick the steering starts to turn. True while it holds the stick."""
+        if not STEER_PROBE or t['lap'] != 3 or t['steer'] is None or getattr(self, 'probed', False):
+            return False
+        s = self.line.hint * driver.SPACING
+        if not PROBE_FROM <= s <= PROBE_TO:
+            if getattr(self, 'probe_seen', None):
+                self.probed = True
+                seen = self.probe_seen
+                start = next((k for k, a in seen if abs(a) > 0.5), None)
+                log('  Probe: the steering starts to turn at stick %s; %s' % (
+                    '%.3f' % start if start is not None else 'over %.2f' % PROBE_MAX,
+                    ', '.join('%.2f: %.1f deg' % (k, a) for k, a in seen[::max(1, len(seen) // 6)])))
+                self.pad.stick(0.0)
+            return False
+        stick = PROBE_MAX * (s - PROBE_FROM) / (PROBE_TO - PROBE_FROM)
+        self.pad.stick(stick)
+        self.probe_seen = getattr(self, 'probe_seen', None) or []
+        self.probe_seen.append((stick, -math.degrees(t['steer'])))  # the recordings show right as negative
+        return True
 
     def drive(self):
         """Steer like the key taps: the left stick fully right briefly, again and again."""
