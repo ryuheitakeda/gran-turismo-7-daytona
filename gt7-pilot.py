@@ -123,6 +123,10 @@ STEER_PROBE = env('STEER_PROBE', '') == '1'  # line: find the stick's dead zone 
 PROBE_FROM, PROBE_TO, PROBE_MAX = 1700, 2300, 0.3  # metres along the line, and the stick it ramps up to (right)
 TAPS_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.taps')  # touch it: back to taps
 LOST = 8.0  # line: metres off the line at which it stops steering and drives straight until back within half of it
+# driving straight like that above LOST_SPEED km/h, R2 at LOST_THROTTLE: thrown 8 m inside at 233 km/h,
+# the car ran on at 277 into the first banking at 25 degrees and down onto the apron (2026-10-30 20:26)
+LOST_SPEED = float(env('LOST_SPEED', '150'))
+LOST_THROTTLE = float(env('LOST_THROTTLE', '0.3'))
 
 
 def log(text):
@@ -212,6 +216,8 @@ class Pilot:
                     self.moving_since = self.moving_since or now
                     ramp = min(1.0, max(0.0, (now - self.moving_since) / LAUNCH_TIME * 1.5 - 0.5))
                     level = round(self.launch_throttle + (1.0 - self.launch_throttle) * ramp, 2)
+                    if self.off_line and t['speed'] > LOST_SPEED:
+                        level = min(level, LOST_THROTTLE)
                 if level != self.r2_level:
                     self.r2_level = level
                     self.pad.r2(level)
