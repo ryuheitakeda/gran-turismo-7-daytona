@@ -222,9 +222,10 @@ def classify(image, refs):
     return name, distance
 
 
-# where the credits show: the top bar of the menus, and the balance on the rewards screen
-TOP_CREDITS = (352, 24, 115, 24)
-REWARD_BALANCE = (950, 278, 200, 38)
+# where the credits show: the top bar of the menus (left-aligned), and the balance on the rewards
+# screen (right-aligned after "Cr."); wide enough for 10 digits (1,002,948,200 on 2026-10-30)
+TOP_CREDITS = (352, 24, 135, 24)
+REWARD_BALANCE = (940, 278, 210, 38)
 
 
 def read_number(image, region, bright=150, scale=3, colour=False):
