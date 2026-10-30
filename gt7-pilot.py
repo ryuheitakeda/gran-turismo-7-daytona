@@ -102,6 +102,14 @@ NITRO_BUTTON = env('NITRO_BUTTON', 'l3')  # GT7's nitrous button (R3 did nothing
 # refill; on 2026-10-30 it lasted 6 laps, and 300-550 gained 0.6 s a lap, 1600-2300 1.2 s
 # (both with the speed carried through the next banking), 3450-3650 nothing
 NITRO_ZONES = [tuple(float(v) for v in z.split('-')) for z in env('NITRO_ZONES', '1600-2300,300-550').split(',')]
+# let go of the nitrous for NITRO_TRAFFIC_HOLD seconds when the course map shows a car within
+# NITRO_TRAFFIC_WITHIN metres ahead that gets nearer by NITRO_TRAFFIC_CLOSING metres a second or
+# more (0: never). Both cars run into on the back straight with nitrous (255-262 km/h) were seen
+# 117-135 m ahead 1-3 s before, about 50 m nearer each second (2026-10-30 16:33 and 16:58, #29).
+# Right beside the car the map shows nothing: its own mark hides the other one
+NITRO_TRAFFIC_WITHIN = float(env('NITRO_TRAFFIC_WITHIN', '0'))
+NITRO_TRAFFIC_CLOSING = float(env('NITRO_TRAFFIC_CLOSING', '30'))
+NITRO_TRAFFIC_HOLD = float(env('NITRO_TRAFFIC_HOLD', '3'))
 STRAIGHTS = [(1700, 2400), (3700, 4100), (0, 500)]  # where TRAFFIC_ACTION=inside may move the car
 SHOTS_DIR = env('SHOTS_DIR', os.path.expanduser('~/gt7-data/shots'))  # the rewards screens (and errors)
 SHOTS_KEPT = 50  # laps this much slower than after the last maintenance: say so
@@ -150,6 +158,7 @@ class Pilot:
                 os.remove(stale)
         # (before the telemetry thread, whose on_packet reads them)
         self.override_until, self.nitro_on, self.r2_on, self.off_line = 0.0, False, False, False
+        self.nitro_held_until = 0.0
         self.r2_level, self.moving_since, self.launching = 0.0, None, False
         self.launch_throttle, self.launch_fails, self.wall_file = LAUNCH_THROTTLE, 0, False
         self.off_wall_since = self.off_wall_last = 0.0
@@ -336,7 +345,8 @@ class Pilot:
                     self.pad.stick(stick)
         if NITRO == 'straights' and self.line:
             station = self.line.hint * driver.SPACING
-            want = self.steering and any(a <= station <= b for a, b in NITRO_ZONES)
+            want = self.steering and any(a <= station <= b for a, b in NITRO_ZONES) and \
+                time.time() >= self.nitro_held_until
             if want != self.nitro_on:
                 self.nitro_on = want
                 self.pad.button(NITRO_BUTTON, want)
@@ -345,13 +355,24 @@ class Pilot:
         """Once a second in the race: read the course map and log a car close ahead; with
         TRAFFIC_ACTION=inside, hold the stick left for a moment on a straight."""
         traffic, window, last_log = minimap.Traffic(TRAFFIC_WITHIN), int(WINDOW_ID), 0.0
+        before = None  # (time, metres) of the last car seen ahead
         while self.running:
             started = time.time()
             if self.steering:
                 try:
                     metres, cars = traffic.update(screen.capture(window))
-                    if metres is not None:
+                    if metres is None:
+                        before = None
+                    else:
                         self.traffic_seen = (time.time(), metres)
+                        closing = (before[1] - metres) / (started - before[0]) \
+                            if before and 0 < started - before[0] <= 2.5 else None
+                        before = (started, metres)
+                        if NITRO_TRAFFIC_WITHIN and metres <= NITRO_TRAFFIC_WITHIN and \
+                                closing is not None and closing >= NITRO_TRAFFIC_CLOSING:
+                            if self.nitro_on and time.time() >= self.nitro_held_until:
+                                log('  Nitrous off: a car %d m ahead, %d m nearer a second' % (metres, closing))
+                            self.nitro_held_until = time.time() + NITRO_TRAFFIC_HOLD
                         station = self.line.hint * driver.SPACING if self.line else None
                         t = self.rx.fresh()
                         if started - last_log >= 5:
