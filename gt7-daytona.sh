@@ -5,141 +5,530 @@
 # This work © 2025 by Jason Lonsberry is licensed under CC BY-NC-SA 4.0.
 # To view a copy of this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
 
+# Usage: gt7-daytona.sh [start|stop|stop-after-race|cancel-stop|status|log [lines]|maintenance-done]
+#   no argument  run in the foreground, quit with CTRL+C
+#   start        run in the background, writing to $LOG_FILE
+#   stop-after-race  stop at the start screen once the current race is over
+#   maintenance-done  the oil or the engine was seen to: the next races set the laps to compare with
+
 set -e
-trap exit_gracefully SIGINT
 
 # To prevent sleep, launch with systemd-inhibit
 
 # ---------- config ----------
+# Every value below can be set in $CONFIG_FILE (bash syntax) or overridden by an
+# environment variable of the same name: environment > config file > default
 
-KEYPRESS_LENGTH=0.08
-LAP_MILES=2.6
-LAPS=10
-QUICKPRESS_LENGTH=0.01
-RACE_PRIZE=85200
-RACE_TIME=671
-WINDOW_NAME='Chiaki | Stream'
+CONFIG_FILE=${CONFIG_FILE:-$HOME/.config/gt7-daytona.conf}
+if [ -f "$CONFIG_FILE" ]; then
+  env_vars=$(export -p)
+  . "$CONFIG_FILE"
+  eval "$env_vars" || true # values from the environment win over the config file
+fi
+
+KEYPRESS_LENGTH=${KEYPRESS_LENGTH:-0.08}
+LAP_MILES=${LAP_MILES:-2.6}
+LAPS=${LAPS:-10}
+LOCK_FILE=${LOCK_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.lock}
+LOG_FILE=${LOG_FILE:-$HOME/gt7-daytona.log}
+STOP_FILE=${STOP_FILE:-${XDG_CACHE_HOME:-$HOME/.cache}/gt7-daytona.stop-after-race}
+DRIVE=${DRIVE:-pwm} # with PILOT=1: pwm (taps), shadow (taps, and log what line would do), line (steer by the track line)
+MAINTENANCE_RACES=${MAINTENANCE_RACES:-20} # remind to check the engine every N races, 0 to turn off
+MAINT_LAP_PCT=${MAINT_LAP_PCT:-1.5} # with PILOT=1, say so when the laps are this many percent slower than after the last maintenance
+MENUS=${MENUS:-auto} # after the race: screen (look before each press), timer, or auto (screen once learned)
+PAD=${PAD:-uinput} # with PILOT=1: uinput for the virtual gamepad, dry to only log it (tests)
+PILOT=${PILOT:-0} # 1: race with gt7-pilot.py and the virtual gamepad instead of the loop below
+RACES_FILE=${RACES_FILE:-$HOME/gt7-races.jsonl} # with PILOT=1, one line per race (lap times, top speed) for the engine wear
+NOTIFY_URL=${NOTIFY_URL:-} # POST a message here when the script stops on its own (not stop, stop-after-race or a signal), e.g. https://ntfy.sh/<your topic>; empty for none
+NOTIFY_CLICK=${NOTIFY_CLICK:-} # with NOTIFY_URL, the page the notification opens (e.g. the gt7-web.py page)
+CREDIT_CAP=${CREDIT_CAP:-10000000000} # with PILOT=1 and MENUS=screen, stop at the start screen before a race that would take the balance past this (the most GT7 holds; more is lost)
+PLAYSTATION_IP=${PLAYSTATION_IP:-} # set to read GT7 telemetry: detect the start, the finish and a stuck car
+QUICKPRESS_LENGTH=${QUICKPRESS_LENGTH:-0.01}
+FINISH_WAIT=${FINISH_WAIT:-8} # with telemetry, seconds from the finish line to the first X
+RACE_PRIZE=${RACE_PRIZE:-9705000} # 1st place with clean race bonus
+RACE_TIME=${RACE_TIME:-800} # seconds from "Race start" to crossing the finish line, used without telemetry
+SCREEN_RECORD=${SCREEN_RECORD:-} # directory to keep screenshots of the menus and the race in (needs xwd), empty for none
+START_TIMEOUT=${START_TIMEOUT:-15} # with telemetry, quit if the car isn't on track this many seconds after X
+STUCK_SPEED=${STUCK_SPEED:-30} # with telemetry, km/h below which the car counts as stuck
+STUCK_TIME=${STUCK_TIME:-5} # with telemetry, quit after being stuck this many seconds (PILOT=1: drive on with taps)
+STUCK_GIVE_UP=${STUCK_GIVE_UP:-60} # with PILOT=1, quit when still stuck after this many seconds
+STUCK_RETRY=${STUCK_RETRY:-20} # with PILOT=1 and the screens learned, pause and retry the race when stuck this many seconds (0: never)
+STRAIGHT_TIME=${STRAIGHT_TIME:-15} # seconds to drive straight after the start to avoid hitting cars ahead
+CURVE_STICK=${CURVE_STICK:-0} # with DRIVE=line, left stick added in the sharpest bend, less in gentler ones
+STEER_KD=${STEER_KD:-0.1} # with DRIVE=line, stick per metre off the aim
+STEER_KPSI=${STEER_KPSI:-1.0} # with DRIVE=line, stick per radian of heading towards the wall
+STEER_MAX=${STEER_MAX:-0.3} # with DRIVE=line, the most stick either way (1 is full lock)
+NITRO=${NITRO:-off} # with PILOT=1 and DRIVE=line: straights holds R3 (nitrous) in NITRO_ZONES (metres along the line, default 1700-2300,3700-4100,0-300)
+TAP_INTERVAL=${TAP_INTERVAL:-0.58} # with PILOT=1, seconds from one steering tap to the next
+TRAFFIC=${TRAFFIC:-log} # with PILOT=1: read the course map once a second in the race and log a car close ahead (off to stop)
+TRAFFIC_ACTION=${TRAFFIC_ACTION:-none} # inside: on a straight, hold the stick TRAFFIC_STICK (-0.25) left while a car is within TRAFFIC_WITHIN (200) m ahead
+TAP_LENGTH=${TAP_LENGTH:-0.053} # with PILOT=1, seconds each steering tap lasts (the key taps measured on :0)
+TELEMETRY_RECORD=${TELEMETRY_RECORD:-} # with telemetry, directory to record every packet in (gt7-analyze.py), empty for none
+RECORD_KEEP_HOURS=${RECORD_KEEP_HOURS:-0} # with PILOT=1, remove the recordings in SCREEN_RECORD and TELEMETRY_RECORD older than this many hours (only YYYYmmdd-HHMMSS names: rename one to keep it); 0 keeps all
+RECORD_MIN_FREE_GB=${RECORD_MIN_FREE_GB:-10} # with PILOT=1, stop saving the screens when the disk has less free than this
+WALL_GAP=${WALL_GAP:-0.3} # with DRIVE=line, metres inside the wall line (gt7-analyze.py track) to aim for
+WINDOW_NAME=${WINDOW_NAME:-'^Chiaki \| Stream$'} # xdotool regex, case-insensitive
 
 # ---------- key config ----------
 # Key config MUST be set to match your Chiaki key config
 
-ANALOG_L__R='bracketright' # default ']' Left analog pressing right
-DPAD_R='Right'             # default 'Right'
-KEY_R2='4'                 # default '4'
-KEY_X='Return'             # default 'Return'
-
-# ---------- dependencies ----------
-
-if ! dpkg -s wmctrl >/dev/null 2>&1; then
-  sudo apt install wmctrl
-fi
-if ! dpkg -s xdotool >/dev/null 2>&1; then
-  sudo apt install xdotool
-fi
+ANALOG_L__R=${ANALOG_L__R:-bracketright} # default ']' Left analog pressing right
+DPAD_L=${DPAD_L:-Left}                   # default 'Left'
+DPAD_R=${DPAD_R:-Right}                  # default 'Right'
+KEY_R2=${KEY_R2:-4}                      # default '4'
+KEY_O=${KEY_O:-BackSpace}                # default 'Backspace' (circle)
+KEY_X=${KEY_X:-Return}                   # default 'Return'
 
 # ---------- functions ----------
 
-add() {
-  echo "scale=1; $1 + $2" | bc
+log() {
+  echo "$(date '+%F %T') $*"
 }
 
-multiply() {
-  echo "$1 * $2" | bc
+pause() { # sleep that a signal can interrupt at once
+  sleep "$1" 9>&- & # don't pass on the lock
+  wait $!
+}
+
+running_pid() { # print the pid of the running script, if any
+  [ -f "$LOCK_FILE" ] || return 1
+  if flock -n "$LOCK_FILE" true; then
+    return 1
+  fi
+  cat "$LOCK_FILE"
+}
+
+send() { # send <keydown|keyup> <key>
+  # look the window up on every key: the steering is tuned to the time this takes.
+  # The lookup also fails when another window closes while it runs, so try a few
+  # more times before deciding the stream window is gone
+  local try
+  for try in 1 2 3 4 5; do
+    if xdotool search --name "$WINDOW_NAME" "$1" "$2" 2>/dev/null; then
+      return
+    fi
+    sleep 0.2
+  done
+  log 'ERROR: the Chiaki stream window is gone (stream disconnected?)'
+  exit 1
 }
 
 hold() {
-  xdotool search --name "$WINDOW_NAME" keydown "$1"
+  send keydown "$1"
 }
 
 release() {
-  xdotool search --name "$WINDOW_NAME" keyup "$1"
+  send keyup "$1"
 }
 
-press() {
-  xdotool search --name "$WINDOW_NAME" keydown "$1"
-  sleep $KEYPRESS_LENGTH
-  xdotool search --name "$WINDOW_NAME" keyup "$1"
+press() { # press <key> [label]: with a label, also save a screenshot (SCREEN_RECORD)
+  # one xdotool for both ends, so the key is held exactly KEYPRESS_LENGTH: a lookup
+  # before the keyup can make it longer, and a long press moves GT7's cursor twice
+  [ -z "${2:-}" ] || snap "$2"
+  local try
+  for try in 1 2 3 4 5; do
+    if xdotool search --name "$WINDOW_NAME" keydown "$1" sleep $KEYPRESS_LENGTH keyup "$1" 2>/dev/null; then
+      return
+    fi
+    sleep 0.2
+  done
+  log 'ERROR: the Chiaki stream window is gone (stream disconnected?)'
+  exit 1
+}
+
+snap() { # snap <label>: save a screenshot in the background when SCREEN_RECORD is set
+  [ -n "$SCREEN_DIR" ] || return 0
+  "$(dirname "$0")/gt7-screen.py" snap --id "$WINDOW_ID" \
+    "$SCREEN_DIR/$(date +%H%M%S.%1N)-race$race_count-$1.png" 9>&- >/dev/null 2>&1 &
+}
+
+snap_every() { # snap_every <seconds> <label>: save screenshots until the next snap_every
+  [ -n "$SCREEN_DIR" ] || return 0
+  [ -z "$snapper" ] || kill "$snapper" 2>/dev/null || true
+  "$(dirname "$0")/gt7-screen.py" record --id "$WINDOW_ID" --every "$1" \
+    "$SCREEN_DIR" "race$race_count-$2" 9>&- >/dev/null 2>&1 &
+  snapper=$!
 }
 
 quick_press() {
-  xdotool search --name "$WINDOW_NAME" keydown "$1"
+  send keydown "$1"
   sleep $QUICKPRESS_LENGTH
-  xdotool search --name "$WINDOW_NAME" keyup "$1"
+  send keyup "$1"
+}
+
+telemetry() { # read the latest telemetry into t_*; fails without fresh data
+  [ -n "$PLAYSTATION_IP" ] && [ -f "$TELEMETRY_FILE" ] || return 1
+  read -r t_time t_on_track t_paused t_loading t_lap t_laps t_speed t_position t_best t_last t_rest < "$TELEMETRY_FILE" || return 1
+  [ $((EPOCHSECONDS - t_time)) -le 2 ]
+}
+
+lap_time() { # format milliseconds as m:ss.sss
+  printf '%d:%06.3f' $(($1 / 60000)) "$(awk -v ms=$1 'BEGIN { printf "%.3f", (ms % 60000) / 1000 }')"
+}
+
+release_all() {
+  for key in "$ANALOG_L__R" "$DPAD_L" "$DPAD_R" "$KEY_O" "$KEY_R2" "$KEY_X"; do
+    xdotool search --name "$WINDOW_NAME" keyup "$key" 2>/dev/null || true
+  done
+}
+
+notify() { # tell NOTIFY_URL (ntfy headers) why the script stopped: the last lines of the log and today's credits
+  [ -n "$NOTIFY_URL" ] || return 0
+  local today
+  today=$(python3 - "$RACES_FILE" <<'PY' 2>/dev/null
+import datetime, json, sys
+day, credits, count = datetime.date.today().isoformat(), 0, 0
+for line in open(sys.argv[1]):
+    try:
+        r = json.loads(line)
+    except ValueError:
+        continue
+    if str(r.get('time', '')).startswith(day) and r.get('position') == 1:
+        credits += r.get('reward') or r.get('prize') or 0
+        count += 1
+print('{:,} Cr in {} races today'.format(credits, count))
+PY
+  ) || true
+  { echo "GT7 farm stopped at $(date '+%F %T') (exit $1)"
+    [ -z "$today" ] || echo "$today"
+    echo
+    grep -E '^[0-9]{4}-' "$LOG_FILE" 2>/dev/null | tail -n 6 | cut -c12- || true
+  } | curl -fsS -m 10 -H 'Title: GT7 farm stopped' -H 'Priority: high' -H 'Tags: warning' \
+      ${NOTIFY_CLICK:+-H "Click: $NOTIFY_CLICK"} --data-binary @- "$NOTIFY_URL" >/dev/null 2>&1 \
+    || log "WARNING: could not send the notification to NOTIFY_URL"
 }
 
 exit_gracefully() {
-  printf '\nQuitting \n'
-  release $ANALOG_L__R
-  release $DPAD_R
-  release $KEY_R2
-  release $KEY_X
-  exit
+  local status=$?
+  release_all
+  kill $(jobs -p) 2>/dev/null || true
+  [ -z "$TELEMETRY_FILE" ] || rm -f "$TELEMETRY_FILE"
+  log 'Quitting'
+  # stopped on its own: an error, or the credit cap (3). Not stop (INT), stop-after-race (0) or other signals
+  case $status in
+    0|129|130|143) ;;
+    *) notify "$status" ;;
+  esac
 }
+
+# ---------- commands ----------
+
+case "$1" in
+  '') ;;
+  start)
+    if pid=$(running_pid); then
+      echo "Already running (pid $pid)"
+      exit 1
+    fi
+    setsid -f "$0" >> "$LOG_FILE" 2>&1 < /dev/null
+    sleep 2
+    tail -n 5 "$LOG_FILE"
+    exit
+    ;;
+  stop)
+    if ! pid=$(running_pid); then
+      echo 'Not running'
+      exit
+    fi
+    kill -INT "$pid"
+    for i in $(seq 50); do
+      if ! running_pid >/dev/null; then
+        echo 'Stopped'
+        exit
+      fi
+      sleep 0.1
+    done
+    echo "Still running (pid $pid)"
+    exit 1
+    ;;
+  status)
+    if pid=$(running_pid); then
+      echo "Running (pid $pid)"
+    else
+      echo 'Not running'
+    fi
+    tail -n 5 "$LOG_FILE" 2>/dev/null || true
+    exit
+    ;;
+  stop-after-race)
+    if ! pid=$(running_pid); then
+      echo 'Not running'
+      exit 1
+    fi
+    touch "$STOP_FILE"
+    echo 'Will stop at the start screen after this race'
+    exit
+    ;;
+  cancel-stop)
+    rm -f "$STOP_FILE"
+    echo 'Will keep racing'
+    exit
+    ;;
+  log)
+    tail -n "${2:-30}" "$LOG_FILE"
+    exit
+    ;;
+  maintenance-done)
+    printf '{"maintenance": "%s"}\n' "$(date -Iseconds)" >> "$RACES_FILE"
+    echo 'Noted: the next 5 races set the laps to compare with'
+    exit
+    ;;
+  *)
+    echo "Usage: $0 [start|stop|stop-after-race|cancel-stop|status|log [lines]|maintenance-done]" >&2
+    exit 2
+    ;;
+esac
+
+# ---------- dependencies ----------
+
+missing=''
+for cmd in xdotool flock awk ${SCREEN_RECORD:+xwd}; do
+  if ! command -v $cmd >/dev/null 2>&1; then
+    missing="$missing $cmd"
+  fi
+done
+if [ -n "$missing" ]; then
+  echo "Missing commands:$missing. Install them first (e.g. sudo apt install xdotool)" >&2
+  exit 1
+fi
+
+export DISPLAY
+if [ -z "$DISPLAY" ]; then
+  echo 'DISPLAY is not set. Run inside the desktop session or set DISPLAY (e.g. DISPLAY=:20)' >&2
+  exit 1
+fi
+if ! xdotool getdisplaygeometry >/dev/null 2>&1; then
+  echo "Cannot open display $DISPLAY. Quitting" >&2
+  exit 1
+fi
 
 # ---------- main  ----------
 
-RACE_MILES=$(multiply $LAP_MILES $LAPS)
-RACE_TICKS=$(multiply 2 $RACE_TIME)
+mkdir -p "$(dirname "$LOCK_FILE")"
+exec 9<>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "gt7-daytona.sh is already running (pid $(cat "$LOCK_FILE")). Quitting" >&2
+  exit 1
+fi
+echo $$ > "$LOCK_FILE"
+
+WINDOW_ID=$(xdotool search --name "$WINDOW_NAME" 2>/dev/null | head -n 1)
+if [ -z "$WINDOW_ID" ]; then
+  echo "The Chiaki stream window was not found on $DISPLAY. Quitting" >&2
+  exit 1
+fi
+
+TELEMETRY_FILE=""
+SCREEN_DIR=""
+snapper=""
+trap exit_gracefully EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+if [ "$MENUS" = auto ]; then
+  if "$(dirname "$0")/gt7-screen.py" to-start --check 2>/dev/null; then
+    MENUS=screen
+  else
+    MENUS=timer
+  fi
+fi
+
+log "Started: RACE_TIME=$RACE_TIME STRAIGHT_TIME=$STRAIGHT_TIME RACE_PRIZE=$RACE_PRIZE display=$DISPLAY window=$WINDOW_ID menus=$MENUS"
+
+if [ -n "$SCREEN_RECORD" ]; then
+  SCREEN_DIR=$SCREEN_RECORD/$(date +%Y%m%d-%H%M%S)
+  mkdir -p "$SCREEN_DIR"
+  log "Screenshots to $SCREEN_DIR"
+fi
+
+if [ "$PILOT" = 1 ]; then
+  # the same race loop in python, with the virtual gamepad; it reads the telemetry itself
+  if [ -z "$PLAYSTATION_IP" ]; then
+    log 'ERROR: PILOT=1 needs PLAYSTATION_IP'
+    exit 1
+  fi
+  TELEMETRY_FILE=${XDG_RUNTIME_DIR:-/tmp}/gt7-telemetry.state # read by gt7-web.py
+  export PLAYSTATION_IP TELEMETRY_FILE TELEMETRY_RECORD SCREEN_DIR WINDOW_ID WINDOW_NAME STOP_FILE PAD MENUS \
+    KEYPRESS_LENGTH FINISH_WAIT RACE_PRIZE RACE_TIME START_TIMEOUT STUCK_SPEED STUCK_TIME STRAIGHT_TIME \
+    MAINTENANCE_RACES LAPS LAP_MILES TAP_LENGTH TAP_INTERVAL DRIVE WALL_GAP STEER_KD STEER_KPSI STEER_MAX \
+    MENU_TRACE DPAD_LENGTH CURVE_STICK STEER_PROBE STUCK_GIVE_UP STUCK_RETRY RACES_FILE MAINT_LAP_PCT \
+    KEY_X KEY_O DPAD_L DPAD_R LAUNCH_THROTTLE LAUNCH_TIME LAUNCH_KPSI LAUNCH_MAX LAUNCH_STALL LAUNCH_GIVE_UP
+  export TRAFFIC TRAFFIC_WITHIN TRAFFIC_FILE TRAFFIC_ACTION TRAFFIC_STICK NITRO NITRO_ZONES NITRO_BUTTON NITRO_TRAFFIC_WITHIN NITRO_TRAFFIC_CLOSING NITRO_TRAFFIC_HOLD
+  export OFF_WALL_ZONES OFF_WALL_GAP OFF_WALL_KD OFF_WALL_KPSI OFF_WALL_MAX STEER_DEADZONE OFF_WALL_COUNTER OFF_WALL_TAIL OFF_WALL_RAMP OFF_WALL_HOLD OFF_WALL_FADE LOST_SPEED LOST_THROTTLE CREDIT_CAP RECORD_KEEP_HOURS RECORD_MIN_FREE_GB
+  "$(dirname "$0")/gt7-pilot.py" 9>&- &
+  status=0
+  wait $! || status=$?
+  exit $status
+fi
+
+if [ -n "$PLAYSTATION_IP" ]; then
+  TELEMETRY_FILE=${XDG_RUNTIME_DIR:-/tmp}/gt7-telemetry.state # read by gt7-web.py
+  TELEMETRY_RECORD=$TELEMETRY_RECORD "$(dirname "$0")/gt7-telemetry.py" "$PLAYSTATION_IP" "$TELEMETRY_FILE" 9>&- &
+  for i in $(seq 10); do
+    pause 1
+    if telemetry; then
+      break
+    fi
+  done
+  if telemetry; then
+    log "Telemetry from $PLAYSTATION_IP"
+  else
+    log "WARNING: no telemetry from $PLAYSTATION_IP (is UDP port 33740 open?); timing the race with RACE_TIME"
+  fi
+fi
+
+RACE_MILES=$(awk -v m="$LAP_MILES" -v n="$LAPS" 'BEGIN { printf "%.1f", m * n }')
 
 current_miles=0.0
 current_money=0
 race_count=0
 
-if ! wmctrl -l|grep "$WINDOW_NAME" >/dev/null 2>&1; then
-  echo 'The Chiaki stream window was not found. Quitting'
-  exit
-fi
-
-hold $KEY_R2
+rm -f "$STOP_FILE"
 
 while true
 do
+  if [ -f "$STOP_FILE" ]; then
+    rm -f "$STOP_FILE"
+    log 'Stopped after the race as requested; the game is at the start screen'
+    exit 0
+  fi
   race_count=$(($race_count + 1))
 
-  echo "Race $race_count"
-  press $KEY_X
-  sleep 8
+  log "Race $race_count"
+  if [ "$MENUS" = screen ]; then
+    # press Start only on the start screen with the cursor on it. When its menu
+    # has hidden after a while without input, the X that brings it back can
+    # also start the race
+    on_screen=0
+    "$(dirname "$0")/gt7-screen.py" to-start --id "$WINDOW_ID" --timeout 30 \
+      --keys "$KEY_X,$KEY_O,$DPAD_L,$DPAD_R" 9>&- || on_screen=$?
+    case $on_screen in
+      0) press $KEY_X start ;;
+      3) log '  The race started on the X that brought back the start menu' ;;
+      *) log 'ERROR: not on the start screen'; exit 1 ;;
+    esac
+  else
+    if [ $race_count -eq 1 ]; then
+      # the start screen hides its menu after a while without input, and the
+      # first X only brings it back; if the menu was showing, this X starts the
+      # race and the next one lands on the loading screen
+      press $KEY_X start-wake
+      pause 2
+    fi
+    press $KEY_X start
+  fi
+  pause 2
+  hold $KEY_R2 # hold only during the race, never in the menus
+  pause 6
 
-  echo '  Race start'
-  for lap in $(seq 1 $RACE_TICKS); do
-    quick_press $ANALOG_L__R
-    sleep 0.5
+  start_deadline=$((SECONDS + START_TIMEOUT - 8))
+  while telemetry && [ "$t_on_track" -eq 0 ]; do
+    if [ $SECONDS -ge $start_deadline ]; then
+      log 'ERROR: the race did not start (telemetry: the car is not on track)'
+      exit 1
+    fi
+    pause 0.5
   done
 
-  echo '  Race ending'
-  sleep 30
+  if telemetry; then
+    log '  Race start (telemetry: Race ending at the finish line)'
+  else
+    log "  Race start (Race ending at $(date -d "+$RACE_TIME seconds" +%T))"
+  fi
+  snap_every 30 race
+  # time by wall clock: each xdotool call adds overhead, so counting ticks drifts
+  steer_start=$((SECONDS + STRAIGHT_TIME))
+  race_end=$((SECONDS + RACE_TIME))
+  slow_since=''
+  result=''
+  while true; do
+    if telemetry; then
+      if [ "$t_laps" -gt 0 ] && [ "$t_lap" -gt "$t_laps" ]; then
+        result=" (P$t_position, best lap $(lap_time $t_best))"
+        break
+      fi
+      if [ "$t_paused" -eq 0 ] && [ "$t_speed" -lt "$STUCK_SPEED" ] &&
+         { [ "$t_lap" -ge 1 ] || [ $SECONDS -ge $steer_start ]; }; then
+        slow_since=${slow_since:-$SECONDS}
+        if [ $((SECONDS - slow_since)) -ge "$STUCK_TIME" ]; then
+          log "ERROR: the car is stuck (lap $t_lap, $t_speed km/h for ${STUCK_TIME}s)"
+          exit 1
+        fi
+      else
+        slow_since=''
+      fi
+      if [ $SECONDS -ge $((race_end + 120)) ]; then
+        log "ERROR: no finish after $((RACE_TIME + 120))s (lap $t_lap of $t_laps)"
+        exit 1
+      fi
+    elif [ $SECONDS -ge $race_end ]; then
+      break
+    fi
+    if [ $SECONDS -ge $steer_start ]; then
+      quick_press $ANALOG_L__R
+    fi
+    pause 0.5
+  done
 
-  echo 'Standings'
-  sleep 20 # extra wait here to buffer for slow finishes
-  press $KEY_X
-
-  echo 'Rewards'
-  press $KEY_X
-  sleep 3
-
-  current_miles=$(add $current_miles $RACE_MILES)
+  log "  Race ending$result"
+  snap_every 1 menu # until the next race starts
+  current_miles=$(awk -v a="$current_miles" -v b="$RACE_MILES" 'BEGIN { printf "%.1f", a + b }')
   current_money=$((current_money + RACE_PRIZE))
+  if [ -n "$result" ] && [ "$MENUS" = screen ]; then
+    # look at the screen before each press: skip "1st", then through the results
+    # (if the next race has started on the way, the start below finds it running)
+    release $KEY_R2
+    on_screen=0
+    "$(dirname "$0")/gt7-screen.py" to-start --id "$WINDOW_ID" --after-race \
+      --keys "$KEY_X,$KEY_O,$DPAD_L,$DPAD_R" 9>&- || on_screen=$?
+    if [ $on_screen -ne 0 ] && [ $on_screen -ne 3 ]; then
+      log 'ERROR: the screens after the race did not lead back to the start screen'
+      exit 1
+    fi
+    log "$(printf "  Credits: %'d" $current_money)"
+    log "  Miles: $current_miles"
+  else
+    if [ -n "$result" ]; then
+      # telemetry saw the car cross the line, so no buffer for a late finish is needed
+      release $KEY_R2
+      pause $FINISH_WAIT
+      log 'Standings'
+    else
+      pause 30
+      release $KEY_R2
 
-  printf "  Credits: %'d\n" $current_money
-  press $KEY_X
-  sleep 2
+      log 'Standings'
+      pause 20 # extra wait here to buffer for slow finishes
+    fi
+    press $KEY_X standings
 
-  echo "  Miles: $current_miles"
-  press $KEY_X
-  sleep 4
+    log 'Rewards'
+    press $KEY_X rewards
+    pause 3
 
-  echo 'Replay'
-  press $KEY_X
-  sleep 4
-  press $KEY_X
-  sleep 2
-  press $KEY_X
-  press $KEY_X
-  sleep 5
+    log "$(printf "  Credits: %'d" $current_money)"
+    press $KEY_X credits
+    pause 2
 
-  echo 'Retry'
-  press $DPAD_R
-  sleep 1
-  press $KEY_X
-  sleep 4
+    log "  Miles: $current_miles"
+    press $KEY_X miles
+    pause 4
+
+    log 'Replay'
+    press $KEY_X replay1 # the replay's menu, with the cursor on Exit
+    pause 4
+    press $KEY_X replay2 # Exit: the race result with Replay, Retry and Exit
+    pause 4
+
+    log 'Retry'
+    press $DPAD_R retry-right # from Replay to Retry
+    pause 1
+    press $KEY_X retry-x
+    pause 4
+  fi
+
+  if [ "$MAINTENANCE_RACES" -gt 0 ] && [ $((race_count % MAINTENANCE_RACES)) -eq 0 ]; then
+    log "  $race_count races done: check the oil and engine condition"
+  fi
 done
