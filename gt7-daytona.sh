@@ -39,6 +39,8 @@ MENUS=${MENUS:-auto} # after the race: screen (look before each press), timer, o
 PAD=${PAD:-uinput} # with PILOT=1: uinput for the virtual gamepad, dry to only log it (tests)
 PILOT=${PILOT:-0} # 1: race with gt7-pilot.py and the virtual gamepad instead of the loop below
 RACES_FILE=${RACES_FILE:-$HOME/gt7-races.jsonl} # with PILOT=1, one line per race (lap times, top speed) for the engine wear
+NOTIFY_URL=${NOTIFY_URL:-} # POST a message here when the script stops on its own (not stop, stop-after-race or a signal), e.g. https://ntfy.sh/<your topic>; empty for none
+NOTIFY_CLICK=${NOTIFY_CLICK:-} # with NOTIFY_URL, the page the notification opens (e.g. the gt7-web.py page)
 PLAYSTATION_IP=${PLAYSTATION_IP:-} # set to read GT7 telemetry: detect the start, the finish and a stuck car
 QUICKPRESS_LENGTH=${QUICKPRESS_LENGTH:-0.01}
 FINISH_WAIT=${FINISH_WAIT:-8} # with telemetry, seconds from the finish line to the first X
@@ -167,11 +169,43 @@ release_all() {
   done
 }
 
+notify() { # tell NOTIFY_URL (ntfy headers) why the script stopped: the last lines of the log and today's credits
+  [ -n "$NOTIFY_URL" ] || return 0
+  local today
+  today=$(python3 - "$RACES_FILE" <<'PY' 2>/dev/null
+import datetime, json, sys
+day, credits, count = datetime.date.today().isoformat(), 0, 0
+for line in open(sys.argv[1]):
+    try:
+        r = json.loads(line)
+    except ValueError:
+        continue
+    if str(r.get('time', '')).startswith(day) and r.get('position') == 1:
+        credits += r.get('reward') or r.get('prize') or 0
+        count += 1
+print('{:,} Cr in {} races today'.format(credits, count))
+PY
+  ) || true
+  { echo "GT7 farm stopped at $(date '+%F %T') (exit $1)"
+    [ -z "$today" ] || echo "$today"
+    echo
+    grep -E '^[0-9]{4}-' "$LOG_FILE" 2>/dev/null | tail -n 6 | cut -c12- || true
+  } | curl -fsS -m 10 -H 'Title: GT7 farm stopped' -H 'Priority: high' -H 'Tags: warning' \
+      ${NOTIFY_CLICK:+-H "Click: $NOTIFY_CLICK"} --data-binary @- "$NOTIFY_URL" >/dev/null 2>&1 \
+    || log "WARNING: could not send the notification to NOTIFY_URL"
+}
+
 exit_gracefully() {
+  local status=$?
   release_all
   kill $(jobs -p) 2>/dev/null || true
   [ -z "$TELEMETRY_FILE" ] || rm -f "$TELEMETRY_FILE"
   log 'Quitting'
+  # stopped on its own: an error, or the credit cap (3). Not stop (INT), stop-after-race (0) or other signals
+  case $status in
+    0|129|130|143) ;;
+    *) notify "$status" ;;
+  esac
 }
 
 # ---------- commands ----------
