@@ -77,6 +77,11 @@ OFF_WALL_GAP = float(env('OFF_WALL_GAP', '0.6'))  # metres inside the wall line 
 OFF_WALL_KD = float(env('OFF_WALL_KD', '0.03'))  # stick per metre nearer the wall than that
 OFF_WALL_KPSI = float(env('OFF_WALL_KPSI', '0.5'))  # stick per radian of heading towards the wall
 OFF_WALL_MAX = float(env('OFF_WALL_MAX', '0.2'))  # the most stick
+# heading inside there, or for OFF_WALL_TAIL metres after: steer right to stop the turn (0: never).
+# With KD 0.3 the stick went from left to 0 at the end of the zone while the car pointed 3.5
+# degrees inside, and it ran on to 4.1 m inside the wall, back to it at 5 degrees (2026-10-30 15:33)
+OFF_WALL_COUNTER = float(env('OFF_WALL_COUNTER', '0'))  # stick per radian of heading inside
+OFF_WALL_TAIL = float(env('OFF_WALL_TAIL', '150'))
 STEER_DEADZONE = float(env('STEER_DEADZONE', '0.13'))  # stick that does nothing (0.136 measured 2026-10-29)
 WALL_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.wall')  # touch it: ride the wall again
 MENU_TRACE = env('MENU_TRACE', '') == '1'  # log every press on the screens after the race
@@ -222,16 +227,23 @@ class Pilot:
             lap['stick'] += stick
             lap['dmin'], lap['dmax'] = min(lap['dmin'], self.line.d), max(lap['dmax'], self.line.d)
 
-    def off_wall(self, t):
-        """In OFF_WALL_ZONES, unless WALL_FILE is there (looked for twice a second)."""
+    def off_wall(self, t, tail=0.0):
+        """In OFF_WALL_ZONES, their ends moved on by `tail` metres, unless WALL_FILE is there
+        (looked for twice a second)."""
         if not OFF_WALL_ZONES:
             return False
         if t['packet_id'] % 30 == 0:
             self.wall_file = os.path.exists(WALL_FILE)
         if self.wall_file:
             return False
-        station = self.line.hint * driver.SPACING
-        return any(a <= station <= b if a <= b else station >= a or station <= b for a, b in OFF_WALL_ZONES)
+        station, length = self.line.hint * driver.SPACING, self.line.track.n * driver.SPACING
+        for a, b in OFF_WALL_ZONES:
+            wraps, b = a > b, b + tail
+            if not wraps and b >= length:
+                wraps, b = True, b - length  # the tail runs on past the finish
+            if (station >= a or station <= b) if wraps else a <= station <= b:
+                return True
+        return False
 
     def steer_by_line(self, t, stick):
         if DRIVE == 'line' and LAUNCH_KPSI and self.launching and not self.taps and t['speed'] > 15:  # (psi is fresh above 11)
@@ -261,6 +273,11 @@ class Pilot:
                     log('  Back on the track line (%.1f m off it)' % self.line.d)
                 if time.time() < self.override_until:
                     self.pad.stick(TRAFFIC_STICK)  # moving inside past a car ahead
+                elif OFF_WALL_COUNTER and self.line.psi < 0 and self.line.d < -OFF_WALL_GAP and \
+                        self.off_wall(t, OFF_WALL_TAIL):
+                    # heading inside, past OFF_WALL_GAP: right, by the heading only (by d too, it
+                    # would turn the car back at the wall at an angle); the banking does the rest
+                    self.pad.stick(min(OFF_WALL_MAX, STEER_DEADZONE - OFF_WALL_COUNTER * self.line.psi))
                 elif self.off_wall(t):
                     # left only, the dead zone added: nearer the wall than OFF_WALL_GAP or heading
                     # at it; inside that, straight on, and the curve brings the car back out
