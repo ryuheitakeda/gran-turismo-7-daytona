@@ -74,8 +74,10 @@ TRAFFIC_STICK = float(env('TRAFFIC_STICK', '-0.25'))
 NITRO = env('NITRO', 'off')  # straights: hold NITRO_BUTTON in NITRO_ZONES, metres along the track line
 NITRO_BUTTON = env('NITRO_BUTTON', 'l3')  # GT7's nitrous button (R3 did nothing, 2026-10-30)
 # where the car speeds up and traction control 5 doesn't cut the power: it does almost all the
-# time in the bankings and the tri-oval, and nitrous there would be wasted
-NITRO_ZONES = [tuple(float(v) for v in z.split('-')) for z in env('NITRO_ZONES', '1600-2300,300-550,3450-3650').split(',')]
+# time in the bankings and the tri-oval, and nitrous there would be wasted. The tank doesn't
+# refill; on 2026-10-30 it lasted 6 laps, and 300-550 gained 0.6 s a lap, 1600-2300 1.2 s
+# (both with the speed carried through the next banking), 3450-3650 nothing
+NITRO_ZONES = [tuple(float(v) for v in z.split('-')) for z in env('NITRO_ZONES', '1600-2300,300-550').split(',')]
 STRAIGHTS = [(1700, 2400), (3700, 4100), (0, 500)]  # where TRAFFIC_ACTION=inside may move the car
 SHOTS_DIR = env('SHOTS_DIR', os.path.expanduser('~/gt7-data/shots'))  # the rewards screens (and errors)
 SHOTS_KEPT = 50  # laps this much slower than after the last maintenance: say so
