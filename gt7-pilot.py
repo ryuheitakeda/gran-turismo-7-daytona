@@ -71,8 +71,11 @@ TRAFFIC_WITHIN = float(env('TRAFFIC_WITHIN', '200'))  # metres ahead that count 
 TRAFFIC_FILE = env('TRAFFIC_FILE', os.path.expanduser('~/gt7-data/traffic.jsonl'))
 TRAFFIC_ACTION = env('TRAFFIC_ACTION', 'none')  # none, or inside: on a straight, hold the stick left while a car is close ahead
 TRAFFIC_STICK = float(env('TRAFFIC_STICK', '-0.25'))
-NITRO = env('NITRO', 'off')  # straights: hold R3 (nitrous) in NITRO_ZONES, metres along the track line
-NITRO_ZONES = [tuple(float(v) for v in z.split('-')) for z in env('NITRO_ZONES', '1700-2300,3700-4100,0-300').split(',')]
+NITRO = env('NITRO', 'off')  # straights: hold NITRO_BUTTON in NITRO_ZONES, metres along the track line
+NITRO_BUTTON = env('NITRO_BUTTON', 'l3')  # GT7's nitrous button (R3 did nothing, 2026-10-30)
+# where the car speeds up and traction control 5 doesn't cut the power: it does almost all the
+# time in the bankings and the tri-oval, and nitrous there would be wasted
+NITRO_ZONES = [tuple(float(v) for v in z.split('-')) for z in env('NITRO_ZONES', '1600-2300,300-550,3450-3650').split(',')]
 STRAIGHTS = [(1700, 2400), (3700, 4100), (0, 500)]  # where TRAFFIC_ACTION=inside may move the car
 SHOTS_DIR = env('SHOTS_DIR', os.path.expanduser('~/gt7-data/shots'))  # the rewards screens (and errors)
 SHOTS_KEPT = 50  # laps this much slower than after the last maintenance: say so
@@ -236,7 +239,7 @@ class Pilot:
             want = self.steering and any(a <= station <= b for a, b in NITRO_ZONES)
             if want != self.nitro_on:
                 self.nitro_on = want
-                self.pad.button('r3', want)
+                self.pad.button(NITRO_BUTTON, want)
 
     def watch_traffic(self):
         """Once a second in the race: read the course map and log a car close ahead; with
@@ -656,7 +659,7 @@ class Pilot:
             self.pad.stick(0.0)
             if self.nitro_on:
                 self.nitro_on = False
-                self.pad.button('r3', False)
+                self.pad.button(NITRO_BUTTON, False)
             if restarted:
                 log('  The race starts again from the grid')
                 self.count -= 1  # the same race again
