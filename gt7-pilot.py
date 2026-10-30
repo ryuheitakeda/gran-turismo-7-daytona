@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 
-from gt7 import contact, driver, menus, minimap, pad, races, screen, telemetry
+from gt7 import contact, driver, menus, minimap, pad, races, records, screen, telemetry
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 env = os.environ.get
@@ -112,6 +112,8 @@ NITRO_TRAFFIC_CLOSING = float(env('NITRO_TRAFFIC_CLOSING', '30'))
 NITRO_TRAFFIC_HOLD = float(env('NITRO_TRAFFIC_HOLD', '3'))
 STRAIGHTS = [(1700, 2400), (3700, 4100), (0, 500)]  # where TRAFFIC_ACTION=inside may move the car
 SHOTS_DIR = env('SHOTS_DIR', os.path.expanduser('~/gt7-data/shots'))  # the rewards screens (and errors)
+RECORD_KEEP_HOURS = float(env('RECORD_KEEP_HOURS', '0'))  # remove recordings older than this, at the start and after each race (0: keep all)
+RECORD_MIN_FREE_GB = float(env('RECORD_MIN_FREE_GB', '10'))  # less free than this: stop saving the screens
 SHOTS_KEPT = 50  # laps this much slower than after the last maintenance: say so
 STEER_PROBE = env('STEER_PROBE', '') == '1'  # line: find the stick's dead zone once, on lap 3's back straight
 PROBE_FROM, PROBE_TO, PROBE_MAX = 1700, 2300, 0.3  # metres along the line, and the stick it ramps up to (right)
@@ -664,8 +666,25 @@ class Pilot:
         self.press('cross', 'retry-x')
         self.pause(4)
 
+    def tidy_records(self):
+        """Remove the recordings older than RECORD_KEEP_HOURS, and stop saving the screens when
+        the disk gets full (the rewards and error screens still go to SHOTS_DIR)."""
+        global SCREEN_DIR
+        for folder, keep in ((os.path.dirname(SCREEN_DIR) if SCREEN_DIR else '', SCREEN_DIR),
+                             (TELEMETRY_RECORD, '')):
+            removed, freed = records.prune(folder, RECORD_KEEP_HOURS, keep=[keep])
+            if removed:
+                log('  Removed %d recordings older than %g h from %s (%.1f GB)' % (
+                    removed, RECORD_KEEP_HOURS, folder, freed / 1e9))
+        free = records.free_gb(SCREEN_DIR or TELEMETRY_RECORD or HERE)
+        if SCREEN_DIR and free is not None and free < RECORD_MIN_FREE_GB:
+            log('WARNING: %.1f GB free on the disk, less than RECORD_MIN_FREE_GB (%g): '
+                'no more screenshots to %s' % (free, RECORD_MIN_FREE_GB, SCREEN_DIR))
+            SCREEN_DIR = ''
+
     def race(self):
         self.count = 0
+        self.tidy_records()
         money, miles = 0, 0.0
         if os.path.exists(STOP_FILE):
             os.remove(STOP_FILE)
@@ -866,6 +885,7 @@ class Pilot:
                     log('  WARNING: {:,} Cr to the credit cap: about {:.1f} h at {:,.0f} Cr/h'.format(
                         left['left'], left['hours'], left['per_hour']))
 
+            self.tidy_records()
             if MAINTENANCE_RACES > 0 and self.count % MAINTENANCE_RACES == 0:
                 log('  %d races done: check the oil and engine condition' % self.count)
 

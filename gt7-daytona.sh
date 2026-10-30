@@ -64,6 +64,8 @@ TRAFFIC=${TRAFFIC:-log} # with PILOT=1: read the course map once a second in the
 TRAFFIC_ACTION=${TRAFFIC_ACTION:-none} # inside: on a straight, hold the stick TRAFFIC_STICK (-0.25) left while a car is within TRAFFIC_WITHIN (200) m ahead
 TAP_LENGTH=${TAP_LENGTH:-0.053} # with PILOT=1, seconds each steering tap lasts (the key taps measured on :0)
 TELEMETRY_RECORD=${TELEMETRY_RECORD:-} # with telemetry, directory to record every packet in (gt7-analyze.py), empty for none
+RECORD_KEEP_HOURS=${RECORD_KEEP_HOURS:-0} # with PILOT=1, remove the recordings in SCREEN_RECORD and TELEMETRY_RECORD older than this many hours (only YYYYmmdd-HHMMSS names: rename one to keep it); 0 keeps all
+RECORD_MIN_FREE_GB=${RECORD_MIN_FREE_GB:-10} # with PILOT=1, stop saving the screens when the disk has less free than this
 WALL_GAP=${WALL_GAP:-0.3} # with DRIVE=line, metres inside the wall line (gt7-analyze.py track) to aim for
 WINDOW_NAME=${WINDOW_NAME:-'^Chiaki \| Stream$'} # xdotool regex, case-insensitive
 
@@ -353,7 +355,7 @@ if [ "$PILOT" = 1 ]; then
     MENU_TRACE DPAD_LENGTH CURVE_STICK STEER_PROBE STUCK_GIVE_UP STUCK_RETRY RACES_FILE MAINT_LAP_PCT \
     KEY_X KEY_O DPAD_L DPAD_R LAUNCH_THROTTLE LAUNCH_TIME LAUNCH_KPSI LAUNCH_MAX LAUNCH_STALL LAUNCH_GIVE_UP
   export TRAFFIC TRAFFIC_WITHIN TRAFFIC_FILE TRAFFIC_ACTION TRAFFIC_STICK NITRO NITRO_ZONES NITRO_BUTTON NITRO_TRAFFIC_WITHIN NITRO_TRAFFIC_CLOSING NITRO_TRAFFIC_HOLD
-  export OFF_WALL_ZONES OFF_WALL_GAP OFF_WALL_KD OFF_WALL_KPSI OFF_WALL_MAX STEER_DEADZONE OFF_WALL_COUNTER OFF_WALL_TAIL OFF_WALL_RAMP CREDIT_CAP
+  export OFF_WALL_ZONES OFF_WALL_GAP OFF_WALL_KD OFF_WALL_KPSI OFF_WALL_MAX STEER_DEADZONE OFF_WALL_COUNTER OFF_WALL_TAIL OFF_WALL_RAMP CREDIT_CAP RECORD_KEEP_HOURS RECORD_MIN_FREE_GB
   "$(dirname "$0")/gt7-pilot.py" 9>&- &
   status=0
   wait $! || status=$?
