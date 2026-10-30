@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 
-from gt7 import driver, menus, minimap, pad, races, screen, telemetry
+from gt7 import contact, driver, menus, minimap, pad, races, screen, telemetry
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 env = os.environ.get
@@ -136,6 +136,7 @@ class Pilot:
         self.snapper = None
         self.pad = pad.DryPad() if env('PAD') == 'dry' else pad.Pad()
         self.line, self.taps, self.lap_log, self.race_laps = None, DRIVE != 'line', {}, []
+        self.contact, self.race_contacts, self.traffic_seen = contact.Detector(), [], None
         self.last_image, self.reward_presses, self.balance_before, self.balance_after = None, 0, None, None
         if DRIVE in ('shadow', 'line'):
             try:
@@ -201,12 +202,33 @@ class Pilot:
                     self.pad.r2(level)
             stick = self.line.update(t) if self.line else None
             self.count_lap(t, stick)
+            if t['lap'] >= 1 and (self.launching or self.steering):  # (not in the replay after the race)
+                self.check_contact(t)
             if stick is not None:
                 self.steer_by_line(t, stick)
         except Exception as e:  # never let it stop the telemetry
             if not self.taps:
                 self.taps = True
                 log('WARNING: steering by the line failed (%r); steering with taps' % e)
+
+    def check_contact(self, t):
+        """Log a sudden drop in speed (#29): the clean race bonus is lost on contact."""
+        before = self.contact.samples[0][1] if self.contact.samples else t['speed']
+        rate = self.contact.update(t['time'], t['speed'])
+        if rate is None:
+            return
+        station = self.line.hint * driver.SPACING if self.line and self.line.hint is not None else None
+        seen = self.traffic_seen
+        ahead = ', a car %d m ahead %.0f s before' % (seen[1], t['time'] - seen[0]) \
+            if seen and t['time'] - seen[0] <= 10 else ''
+        self.race_contacts.append({'lap': t['lap'], 'station': station and round(station),
+                                   'speed': round(before), 'decel': round(rate, 1),
+                                   'd': self.line and round(self.line.d, 2),
+                                   'heading': self.line and round(math.degrees(self.line.psi), 1)})
+        # (heading about 0 on the wall: a car ahead; at the wall from 4-6 degrees: the wall)
+        log('  WARNING: contact? lap %d%s, %.0f -> %.0f km/h (%.0f m/s2), d %.2f m, heading %.1f deg%s' % (
+            t['lap'], ' at %d m' % station if station is not None else '', before, t['speed'], rate,
+            self.line.d if self.line else 0.0, math.degrees(self.line.psi) if self.line else 0.0, ahead))
 
     def count_lap(self, t, stick):
         lap = self.lap_log
@@ -329,6 +351,7 @@ class Pilot:
                 try:
                     metres, cars = traffic.update(screen.capture(window))
                     if metres is not None:
+                        self.traffic_seen = (time.time(), metres)
                         station = self.line.hint * driver.SPACING if self.line else None
                         t = self.rx.fresh()
                         if started - last_log >= 5:
@@ -418,7 +441,7 @@ class Pilot:
             'best': t['best'] / 1000 if t['best'] > 0 else None,
             'max_speed': round(max((v for n, s, v in laps), default=0)),
             'drive': 'taps' if self.taps else DRIVE, 'prize': RACE_PRIZE,
-            'reward': reward, 'balance': balance,
+            'reward': reward, 'balance': balance, 'contacts': self.race_contacts,
         }
         try:
             races.append(record)
@@ -684,7 +707,8 @@ class Pilot:
             self.snap_every(30, 'race')
             self.taps = DRIVE != 'line' or not self.line
             self.off_line = False
-            self.race_laps = []
+            self.race_laps, self.race_contacts = [], []
+            self.contact.reset()
             started = time.time()
             steer_start, race_end = started + STRAIGHT_TIME, started + RACE_TIME
             slow_since, stuck, checked, result = None, False, started, ''
