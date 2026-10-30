@@ -148,7 +148,8 @@ def error_shot_time():
 
 def state():
     return {'telemetry': telemetry(), 'running': script_running(), 'error_shot': error_shot_time(),
-            'stop_after_race': os.path.exists(STOP_FILE), 'engine': engine(), **earnings()}
+            'stop_after_race': os.path.exists(STOP_FILE), 'engine': engine(),
+            'cap': races.cap(races.load(), time.time()), **earnings()}
 
 
 ACTIONS = {'start': ['start'], 'stop-after-race': ['stop-after-race'],
@@ -246,6 +247,8 @@ pre { margin: 0; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; 
       <tr><td>今日</td><td id="today_credits">–</td></tr>
       <tr><td>今日のレース数 / 1位</td><td id="today_races">–</td></tr>
       <tr><td>今日の 1時間あたり</td><td id="today_per_hour">–</td></tr>
+      <tr><td>所持金</td><td id="balance">–</td></tr>
+      <tr><td>所持金の上限まで</td><td id="cap_left">–</td></tr>
     </table>
     <p class="note">画面の所持金から読めたレースはその賞金で、読めなかったレースは 1位の賞金（クリーンレースボーナス込み）で数えています。</p>
     <img id="reward_shot" alt="" style="width:100%;border-radius:8px;margin-top:8px;display:none" onload="this.style.display='block'">
@@ -337,6 +340,10 @@ async function update() {
   $('today_credits').textContent = `${fmt(d.credits)} Cr`;
   $('today_races').textContent = `${d.races} / ${d.wins}`;
   $('today_per_hour').textContent = `${fmt(d.per_hour)} Cr`;
+  const c = s.cap;
+  $('balance').textContent = c ? `${fmt(c.balance)} Cr` : '–';
+  $('cap_left').textContent = !c ? '–' : c.hours === null ? `${fmt(c.left)} Cr`
+    : `${fmt(c.left)} Cr（約 ${c.hours < 48 ? c.hours.toFixed(1) + ' 時間' : (c.hours / 24).toFixed(1) + ' 日'}）`;
   $('log').textContent = s.log.join('\\n');
   engine(s.engine);
   if (!s.running && s.error_shot) {

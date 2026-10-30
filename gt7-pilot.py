@@ -677,6 +677,11 @@ class Pilot:
                 os.remove(STOP_FILE)
                 log('Stopped after the race as requested; the game is at the start screen')
                 return
+            # (the balance after the last race; a restart reads it back from RACES_FILE)
+            balance = self.balance_after or self.last_balance()
+            if balance and balance + RACE_PRIZE > races.CREDIT_CAP:
+                raise Quit(3, 'WARNING: the balance is {:,} Cr: the next race would take it past the '
+                              'credit cap ({:,}); stopped at the start screen'.format(balance, races.CREDIT_CAP))
             self.count += 1
             log('Race %d' % self.count)
             if MENUS == 'screen':
@@ -856,6 +861,10 @@ class Pilot:
                 self.timed_menus(result, money, miles)
             if result:
                 self.keep_race(finish, seconds, reward, self.balance_after)
+                left = races.cap(races.load(), time.time())
+                if left and left['hours'] is not None and left['hours'] < 24:
+                    log('  WARNING: {:,} Cr to the credit cap: about {:.1f} h at {:,.0f} Cr/h'.format(
+                        left['left'], left['hours'], left['per_hour']))
 
             if MAINTENANCE_RACES > 0 and self.count % MAINTENANCE_RACES == 0:
                 log('  %d races done: check the oil and engine condition' % self.count)

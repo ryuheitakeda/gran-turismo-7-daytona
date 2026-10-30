@@ -41,6 +41,7 @@ PILOT=${PILOT:-0} # 1: race with gt7-pilot.py and the virtual gamepad instead of
 RACES_FILE=${RACES_FILE:-$HOME/gt7-races.jsonl} # with PILOT=1, one line per race (lap times, top speed) for the engine wear
 NOTIFY_URL=${NOTIFY_URL:-} # POST a message here when the script stops on its own (not stop, stop-after-race or a signal), e.g. https://ntfy.sh/<your topic>; empty for none
 NOTIFY_CLICK=${NOTIFY_CLICK:-} # with NOTIFY_URL, the page the notification opens (e.g. the gt7-web.py page)
+CREDIT_CAP=${CREDIT_CAP:-10000000000} # with PILOT=1 and MENUS=screen, stop at the start screen before a race that would take the balance past this (the most GT7 holds; more is lost)
 PLAYSTATION_IP=${PLAYSTATION_IP:-} # set to read GT7 telemetry: detect the start, the finish and a stuck car
 QUICKPRESS_LENGTH=${QUICKPRESS_LENGTH:-0.01}
 FINISH_WAIT=${FINISH_WAIT:-8} # with telemetry, seconds from the finish line to the first X
@@ -352,7 +353,7 @@ if [ "$PILOT" = 1 ]; then
     MENU_TRACE DPAD_LENGTH CURVE_STICK STEER_PROBE STUCK_GIVE_UP STUCK_RETRY RACES_FILE MAINT_LAP_PCT \
     KEY_X KEY_O DPAD_L DPAD_R LAUNCH_THROTTLE LAUNCH_TIME LAUNCH_KPSI LAUNCH_MAX LAUNCH_STALL LAUNCH_GIVE_UP
   export TRAFFIC TRAFFIC_WITHIN TRAFFIC_FILE TRAFFIC_ACTION TRAFFIC_STICK NITRO NITRO_ZONES NITRO_BUTTON NITRO_TRAFFIC_WITHIN NITRO_TRAFFIC_CLOSING NITRO_TRAFFIC_HOLD
-  export OFF_WALL_ZONES OFF_WALL_GAP OFF_WALL_KD OFF_WALL_KPSI OFF_WALL_MAX STEER_DEADZONE OFF_WALL_COUNTER OFF_WALL_TAIL OFF_WALL_RAMP
+  export OFF_WALL_ZONES OFF_WALL_GAP OFF_WALL_KD OFF_WALL_KPSI OFF_WALL_MAX STEER_DEADZONE OFF_WALL_COUNTER OFF_WALL_TAIL OFF_WALL_RAMP CREDIT_CAP
   "$(dirname "$0")/gt7-pilot.py" 9>&- &
   status=0
   wait $! || status=$?
