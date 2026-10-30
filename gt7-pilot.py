@@ -77,6 +77,10 @@ OFF_WALL_GAP = float(env('OFF_WALL_GAP', '0.6'))  # metres inside the wall line 
 OFF_WALL_KD = float(env('OFF_WALL_KD', '0.03'))  # stick per metre nearer the wall than that
 OFF_WALL_KPSI = float(env('OFF_WALL_KPSI', '0.5'))  # stick per radian of heading towards the wall
 OFF_WALL_MAX = float(env('OFF_WALL_MAX', '0.2'))  # the most stick
+# stick past the dead zone kept on at OFF_WALL_GAP itself, to follow the bend there: without it the
+# stick drops to nothing on reaching the gap and the bend takes the car back to the wall, at 2
+# degrees, -10 km/h (459 PS setup, KD 0.3 + KPSI 1.0, 2026-10-30 20:20)
+OFF_WALL_HOLD = float(env('OFF_WALL_HOLD', '0'))
 # heading inside there, or for OFF_WALL_TAIL metres after: steer right to stop the turn (0: never).
 # With KD 0.3 the stick went from left to 0 at the end of the zone while the car pointed 3.5
 # degrees inside, and it ran on to 4.1 m inside the wall, back to it at 5 degrees (2026-10-30 15:33)
@@ -340,7 +344,7 @@ class Pilot:
                         self.off_wall_since = now  # just came in
                     self.off_wall_last = now
                     ramp = min(1.0, (now - self.off_wall_since) / OFF_WALL_RAMP) if OFF_WALL_RAMP > 0 else 1.0
-                    u = OFF_WALL_KD * (self.line.d + OFF_WALL_GAP) + OFF_WALL_KPSI * self.line.psi
+                    u = OFF_WALL_KD * (self.line.d + OFF_WALL_GAP) + OFF_WALL_KPSI * self.line.psi + OFF_WALL_HOLD
                     self.pad.stick(-(STEER_DEADZONE + ramp * (min(OFF_WALL_MAX, STEER_DEADZONE + u) - STEER_DEADZONE))
                                    if u > 0 else 0.0)
                 else:
