@@ -152,6 +152,7 @@ class Pilot:
         self.r2_level, self.moving_since, self.launching = 0.0, None, False
         self.launch_throttle, self.launch_fails, self.wall_file = LAUNCH_THROTTLE, 0, False
         self.off_wall_since = self.off_wall_last = 0.0
+        self.off_wall_ok, self.off_wall_out = False, None  # been outside OFF_WALL_ZONES long enough since steering started
         self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
         threading.Thread(target=self.drive, daemon=True).start()
@@ -250,7 +251,22 @@ class Pilot:
                 return True
         return False
 
+    def off_wall_now(self, t):
+        """In a zone that the car came into while steering: not the one it is in when steering
+        starts after the launch. The car is not pressed on the wall there yet, and the left took
+        it 3.2 m inside even raised over OFF_WALL_RAMP (2026-10-30 16:11; 4.1 m at 15:33 without)."""
+        now = time.time()
+        if not self.off_wall(t):
+            # steered along the wall outside the zones for 2 s: pressed on it by the next one
+            self.off_wall_out = self.off_wall_out or now
+            self.off_wall_ok = self.off_wall_ok or now - self.off_wall_out >= 2
+            return False
+        self.off_wall_out = None
+        return self.off_wall_ok
+
     def steer_by_line(self, t, stick):
+        if not self.steering:
+            self.off_wall_ok, self.off_wall_out = False, None
         if DRIVE == 'line' and LAUNCH_KPSI and self.launching and not self.taps and t['speed'] > 15:  # (psi is fresh above 11)
             # from the grid until STRAIGHT_TIME: keep the heading along the line (steer left as
             # soon as it turns towards the wall), without the pull to the wall. Straight on, the
@@ -283,7 +299,7 @@ class Pilot:
                     # heading inside, past OFF_WALL_GAP: right, by the heading only (by d too, it
                     # would turn the car back at the wall at an angle); the banking does the rest
                     self.pad.stick(min(OFF_WALL_MAX, STEER_DEADZONE - OFF_WALL_COUNTER * self.line.psi))
-                elif self.off_wall(t):
+                elif self.off_wall_now(t):
                     # left only, the dead zone added: nearer the wall than OFF_WALL_GAP or heading
                     # at it; inside that, straight on, and the curve brings the car back out
                     now = time.time()
