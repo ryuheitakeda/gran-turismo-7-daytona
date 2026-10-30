@@ -68,6 +68,17 @@ STEER_KD = float(env('STEER_KD', '0.1'))  # line: stick per metre off the aim
 STEER_KPSI = float(env('STEER_KPSI', '1.0'))  # line: stick per radian of heading towards the wall
 STEER_MAX = float(env('STEER_MAX', '0.3'))  # line: the most stick either way
 CURVE_STICK = float(env('CURVE_STICK', '0'))  # line: left stick added in the sharpest bend (less elsewhere)
+# off the wall: the line's stick stays inside GT7's dead zone, so the car is never steered and
+# only the wall turns it; on the tri-oval it scrubs the wall from 217 to 193 km/h with traction
+# control cutting (2026-10-30). In OFF_WALL_ZONES (metres along the line, a-b wraps past the
+# finish when a > b) steer left, past the dead zone, while nearer the wall than OFF_WALL_GAP
+OFF_WALL_ZONES = [tuple(float(v) for v in z.split('-')) for z in env('OFF_WALL_ZONES', '').split(',') if z]
+OFF_WALL_GAP = float(env('OFF_WALL_GAP', '0.6'))  # metres inside the wall line to keep
+OFF_WALL_KD = float(env('OFF_WALL_KD', '0.03'))  # stick per metre nearer the wall than that
+OFF_WALL_KPSI = float(env('OFF_WALL_KPSI', '0.5'))  # stick per radian of heading towards the wall
+OFF_WALL_MAX = float(env('OFF_WALL_MAX', '0.2'))  # the most stick
+STEER_DEADZONE = float(env('STEER_DEADZONE', '0.13'))  # stick that does nothing (0.136 measured 2026-10-29)
+WALL_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.wall')  # touch it: ride the wall again
 MENU_TRACE = env('MENU_TRACE', '') == '1'  # log every press on the screens after the race
 MAINT_LAP_PCT = float(env('MAINT_LAP_PCT', '1.5'))
 TRAFFIC = env('TRAFFIC', 'log')  # read the course map once a second in the race: off, log (cars close ahead)
@@ -130,7 +141,7 @@ class Pilot:
         # (before the telemetry thread, whose on_packet reads them)
         self.override_until, self.nitro_on, self.r2_on, self.off_line = 0.0, False, False, False
         self.r2_level, self.moving_since, self.launching = 0.0, None, False
-        self.launch_throttle, self.launch_fails = LAUNCH_THROTTLE, 0
+        self.launch_throttle, self.launch_fails, self.wall_file = LAUNCH_THROTTLE, 0, False
         self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
         threading.Thread(target=self.drive, daemon=True).start()
@@ -211,6 +222,17 @@ class Pilot:
             lap['stick'] += stick
             lap['dmin'], lap['dmax'] = min(lap['dmin'], self.line.d), max(lap['dmax'], self.line.d)
 
+    def off_wall(self, t):
+        """In OFF_WALL_ZONES, unless WALL_FILE is there (looked for twice a second)."""
+        if not OFF_WALL_ZONES:
+            return False
+        if t['packet_id'] % 30 == 0:
+            self.wall_file = os.path.exists(WALL_FILE)
+        if self.wall_file:
+            return False
+        station = self.line.hint * driver.SPACING
+        return any(a <= station <= b if a <= b else station >= a or station <= b for a, b in OFF_WALL_ZONES)
+
     def steer_by_line(self, t, stick):
         if DRIVE == 'line' and LAUNCH_KPSI and self.launching and not self.taps and t['speed'] > 15:  # (psi is fresh above 11)
             # from the grid until STRAIGHT_TIME: keep the heading along the line (steer left as
@@ -239,6 +261,11 @@ class Pilot:
                     log('  Back on the track line (%.1f m off it)' % self.line.d)
                 if time.time() < self.override_until:
                     self.pad.stick(TRAFFIC_STICK)  # moving inside past a car ahead
+                elif self.off_wall(t):
+                    # left only, the dead zone added: nearer the wall than OFF_WALL_GAP or heading
+                    # at it; inside that, straight on, and the curve brings the car back out
+                    u = OFF_WALL_KD * (self.line.d + OFF_WALL_GAP) + OFF_WALL_KPSI * self.line.psi
+                    self.pad.stick(-min(OFF_WALL_MAX, STEER_DEADZONE + u) if u > 0 else 0.0)
                 else:
                     self.pad.stick(stick)
         if NITRO == 'straights' and self.line:
