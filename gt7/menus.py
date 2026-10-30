@@ -82,10 +82,13 @@ def to_start(press, look, log=lambda text: None, timeout=150, pause=time.sleep, 
 PAUSE_TO_RETRY = {'pause/continue': 'right', 'pause/settings': 'left', 'pause/exit': 'left'}
 
 
-def retry_race(press, look, log=lambda text: None, timeout=60, pause=time.sleep, trace=None):
+def retry_race(press, look, log=lambda text: None, timeout=60, pause=time.sleep, trace=None,
+               racing=lambda: False):
     """Pause the race (press('options')) and pick Retry: GT7 restarts the race at the
     grid at once, with no confirmation. Returns True when the race shows again,
-    False when the pause menu or the restarted race doesn't show in time."""
+    False when the pause menu or the restarted race doesn't show in time. racing()
+    tells (by the telemetry) that the race runs, unpaused: an unknown screen then
+    counts as the race, for the pause."""
     deadline = time.time() + timeout
     last, since, presses = None, time.time(), 0
     while time.time() < deadline:
@@ -99,8 +102,10 @@ def retry_race(press, look, log=lambda text: None, timeout=60, pause=time.sleep,
             button = 'cross'
         elif name in PAUSE_TO_RETRY:
             button = PAUSE_TO_RETRY[name]
-        elif name == 'race' and time.time() - since >= 1.0:
-            button = 'options'  # open the pause menu (again when the press was lost)
+        elif (name == 'race' or name == 'unknown' and racing()) and time.time() - since >= 1.0:
+            # open the pause menu (again when the press was lost); with the car nose-first in
+            # the wall, lit stands can hide POSITION and LAP (2026-10-30 03:56)
+            button = 'options'
         if button:
             if trace:
                 trace(name, button)

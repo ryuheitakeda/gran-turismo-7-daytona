@@ -43,9 +43,12 @@ STUCK_SPEED = float(env('STUCK_SPEED', '30'))
 STUCK_TIME = float(env('STUCK_TIME', '5'))
 STUCK_GIVE_UP = float(env('STUCK_GIVE_UP', '60'))  # stuck this long: give up (GT7 puts a stuck car back sooner)
 STUCK_RETRY = float(env('STUCK_RETRY', '20'))  # stuck this long: pause and retry the race (0: never)
-LAUNCH_THROTTLE = float(env('LAUNCH_THROTTLE', '0.5'))  # R2 from standstill: full R2 spins the rear out
+# the launch: full R2 and no steering is right with traction control 5; with 3, full R2 spun the
+# rear out and the car turned right into the wall (4 of 9 starts, 2026-10-30), and 0.5 here
+# with LAUNCH_KPSI 2 is the untried fix for that
+LAUNCH_THROTTLE = float(env('LAUNCH_THROTTLE', '1'))  # R2 from standstill
 LAUNCH_TIME = float(env('LAUNCH_TIME', '3'))  # seconds from moving off to full R2 (LAUNCH_THROTTLE for the first third)
-LAUNCH_KPSI = float(env('LAUNCH_KPSI', '2.0'))  # line, until STRAIGHT_TIME: stick per radian of heading towards the wall
+LAUNCH_KPSI = float(env('LAUNCH_KPSI', '0'))  # line, until STRAIGHT_TIME: stick per radian of heading towards the wall
 LAUNCH_MAX = float(env('LAUNCH_MAX', '0.5'))  # the most stick then
 RETRY_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.retry')  # touch it: retry the race now
 STRAIGHT_TIME = float(env('STRAIGHT_TIME', '15'))
@@ -199,7 +202,7 @@ class Pilot:
             lap['dmin'], lap['dmax'] = min(lap['dmin'], self.line.d), max(lap['dmax'], self.line.d)
 
     def steer_by_line(self, t, stick):
-        if DRIVE == 'line' and self.launching and not self.taps and t['speed'] > 15:  # (psi is fresh above 11)
+        if DRIVE == 'line' and LAUNCH_KPSI and self.launching and not self.taps and t['speed'] > 15:  # (psi is fresh above 11)
             # from the grid until STRAIGHT_TIME: keep the heading along the line (steer left as
             # soon as it turns towards the wall), without the pull to the wall. Straight on, the
             # rear stepped out and the car met the wall nose-first at 50 km/h, again and again
@@ -407,7 +410,12 @@ class Pilot:
         log('  Retrying the race from the pause menu')
         refs, window = screen.references(), int(WINDOW_ID)
         return menus.retry_race(self.menu_press, lambda: self.look(window, refs), log,
-                                pause=self.pause, trace=self.trace)
+                                pause=self.pause, trace=self.trace, racing=self.racing)
+
+    def racing(self):
+        """The telemetry says the race runs and isn't paused."""
+        t = self.rx.fresh()
+        return bool(t and t['on_track'] and not t['paused'] and not t['loading'])
 
     def error_shot(self):
         """Keep a screenshot of the window for the web page before quitting on an error."""
