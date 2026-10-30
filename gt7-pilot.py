@@ -52,6 +52,8 @@ LAUNCH_THROTTLE = float(env('LAUNCH_THROTTLE', '1'))  # R2 from standstill
 LAUNCH_TIME = float(env('LAUNCH_TIME', '3'))  # seconds from moving off to full R2 (LAUNCH_THROTTLE for the first third)
 LAUNCH_KPSI = float(env('LAUNCH_KPSI', '3'))  # line, until STRAIGHT_TIME: stick per radian of heading towards the wall
 LAUNCH_MAX = float(env('LAUNCH_MAX', '0.3'))  # the most stick then (0.5 swings about 12 degrees, too much at 60 km/h)
+LAUNCH_STALL = float(env('LAUNCH_STALL', '3'))  # stopped this long on lap 0 after moving off: retry at once
+LAUNCH_GIVE_UP = int(env('LAUNCH_GIVE_UP', '6'))  # this many stalled launches in a row: quit (after 2, R2 at 0.5)
 RETRY_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.retry')  # touch it: retry the race now
 STRAIGHT_TIME = float(env('STRAIGHT_TIME', '15'))
 MAINTENANCE_RACES = int(env('MAINTENANCE_RACES', '20'))
@@ -128,6 +130,7 @@ class Pilot:
         # (before the telemetry thread, whose on_packet reads them)
         self.override_until, self.nitro_on, self.r2_on, self.off_line = 0.0, False, False, False
         self.r2_level, self.moving_since, self.launching = 0.0, None, False
+        self.launch_throttle, self.launch_fails = LAUNCH_THROTTLE, 0
         self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
         threading.Thread(target=self.drive, daemon=True).start()
@@ -166,11 +169,11 @@ class Pilot:
             if self.r2_on:
                 now = time.time()
                 if t['speed'] < 5:
-                    self.moving_since, level = None, LAUNCH_THROTTLE  # standing: launch again
+                    self.moving_since, level = None, self.launch_throttle  # standing: launch again
                 else:
                     self.moving_since = self.moving_since or now
                     ramp = min(1.0, max(0.0, (now - self.moving_since) / LAUNCH_TIME * 1.5 - 0.5))
-                    level = round(LAUNCH_THROTTLE + (1.0 - LAUNCH_THROTTLE) * ramp, 2)
+                    level = round(self.launch_throttle + (1.0 - self.launch_throttle) * ramp, 2)
                 if level != self.r2_level:
                     self.r2_level = level
                     self.pad.r2(level)
@@ -306,7 +309,7 @@ class Pilot:
         in a row (2026-10-30 02:12). (Held at half until 120 km/h, the gearbox stayed in
         first and the car crawled at 60 km/h, 02:28.)"""
         self.r2_on = on
-        self.r2_level = LAUNCH_THROTTLE if on else 0.0
+        self.r2_level = self.launch_throttle if on else 0.0
         self.moving_since = None
         self.pad.r2(self.r2_level)
 
@@ -603,12 +606,38 @@ class Pilot:
             steer_start, race_end = started + STRAIGHT_TIME, started + RACE_TIME
             slow_since, stuck, checked, result = None, False, started, ''
             retried = restarted = False
+            top0, stall_since = 0.0, None  # lap 0: the top speed, and since when stopped after it
             while True:
                 t, now = self.rx.fresh(), time.time()
                 if t:
                     if t['laps'] > 0 and t['lap'] > t['laps']:
                         result = ' (P%d, best lap %s)' % (t['race_position'], lap_time(t['best']))
                         break
+                    if t['lap'] == 0 and not t['paused']:
+                        top0 = max(top0, t['speed'])
+                        if top0 >= 20 and t['speed'] < 5:
+                            stall_since = stall_since or now
+                        else:
+                            stall_since = None
+                    elif t['lap'] >= 1 and self.launch_fails:
+                        self.launch_fails = 0
+                    if stall_since and now - stall_since >= LAUNCH_STALL and not retried and screen.references():
+                        # moved off and stopped again: nose-first in the wall, where waiting for
+                        # STRAIGHT_TIME and STUCK_RETRY only cost another 40 s (2026-10-30 02:51-03:57)
+                        self.launch_fails += 1
+                        log('  The launch stalled (%d in a row): stopped after %d km/h'
+                            % (self.launch_fails, top0))
+                        if self.launch_fails >= LAUNCH_GIVE_UP:
+                            self.error_shot()
+                            raise Quit(1, 'ERROR: %d launches in a row stalled' % self.launch_fails)
+                        if self.launch_fails >= 2 and self.launch_throttle > 0.5:
+                            self.launch_throttle = 0.5
+                            log('  Launching with R2 at 0.5, full by %gs after moving off, from now on' % LAUNCH_TIME)
+                        retried = True
+                        if self.retry_race():
+                            restarted = True
+                            break
+                        log('WARNING: could not retry the race from the pause menu')
                     if not t['paused'] and t['speed'] < STUCK_SPEED and (t['lap'] >= 1 or now >= steer_start):
                         slow_since = slow_since or now
                         if now - slow_since >= STUCK_TIME and not stuck:
