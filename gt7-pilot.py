@@ -43,13 +43,15 @@ STUCK_SPEED = float(env('STUCK_SPEED', '30'))
 STUCK_TIME = float(env('STUCK_TIME', '5'))
 STUCK_GIVE_UP = float(env('STUCK_GIVE_UP', '60'))  # stuck this long: give up (GT7 puts a stuck car back sooner)
 STUCK_RETRY = float(env('STUCK_RETRY', '20'))  # stuck this long: pause and retry the race (0: never)
-# the launch: full R2 and no steering is right with traction control 5; with 3, full R2 spun the
-# rear out and the car turned right into the wall (4 of 9 starts, 2026-10-30), and 0.5 here
-# with LAUNCH_KPSI 2 is the untried fix for that
+# the launch. Even with traction control 5 the rear slides down the banking and the car turns
+# right: unsteered it met the wall at 51 km/h, 13 degrees, and scrubbed along it in 1st gear to
+# 85 km/h 14 s after moving off. Holding the heading along the line (left as soon as it turns
+# towards the wall) got there in 5 s and reached the end of lap 1 10 s sooner (2026-10-30).
+# With traction control 3 full R2 spun the rear out (4 of 9 starts); 0.5 here is for that
 LAUNCH_THROTTLE = float(env('LAUNCH_THROTTLE', '1'))  # R2 from standstill
 LAUNCH_TIME = float(env('LAUNCH_TIME', '3'))  # seconds from moving off to full R2 (LAUNCH_THROTTLE for the first third)
-LAUNCH_KPSI = float(env('LAUNCH_KPSI', '0'))  # line, until STRAIGHT_TIME: stick per radian of heading towards the wall
-LAUNCH_MAX = float(env('LAUNCH_MAX', '0.5'))  # the most stick then
+LAUNCH_KPSI = float(env('LAUNCH_KPSI', '3'))  # line, until STRAIGHT_TIME: stick per radian of heading towards the wall
+LAUNCH_MAX = float(env('LAUNCH_MAX', '0.3'))  # the most stick then (0.5 swings about 12 degrees, too much at 60 km/h)
 RETRY_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.retry')  # touch it: retry the race now
 STRAIGHT_TIME = float(env('STRAIGHT_TIME', '15'))
 MAINTENANCE_RACES = int(env('MAINTENANCE_RACES', '20'))
@@ -210,8 +212,8 @@ class Pilot:
         if DRIVE == 'line' and LAUNCH_KPSI and self.launching and not self.taps and t['speed'] > 15:  # (psi is fresh above 11)
             # from the grid until STRAIGHT_TIME: keep the heading along the line (steer left as
             # soon as it turns towards the wall), without the pull to the wall. Straight on, the
-            # rear stepped out and the car met the wall nose-first at 50 km/h, again and again
-            # with traction control 3 (2026-10-30 02:12-02:53)
+            # rear steps out and the car meets the wall nose-first at about 50 km/h (with traction
+            # control 3 it stuck there, 2026-10-30 02:12-02:53)
             self.pad.stick(max(-LAUNCH_MAX, min(LAUNCH_MAX, -LAUNCH_KPSI * self.line.psi)))
             return
         if DRIVE == 'line' and self.steering and not self.taps and self.probe(t):
