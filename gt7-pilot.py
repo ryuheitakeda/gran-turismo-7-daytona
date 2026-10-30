@@ -81,6 +81,11 @@ OFF_WALL_MAX = float(env('OFF_WALL_MAX', '0.2'))  # the most stick
 # stick drops to nothing on reaching the gap and the bend takes the car back to the wall, at 2
 # degrees, -10 km/h (459 PS setup, KD 0.3 + KPSI 1.0, 2026-10-30 20:20)
 OFF_WALL_HOLD = float(env('OFF_WALL_HOLD', '0'))
+# and over the last OFF_WALL_FADE metres of a zone, let the stick past the dead zone down to nothing
+# (0: at once at the end). With KD 0.3 on the 459 PS setup the car began to leave the wall 30 m
+# before the end of 3750-250 and swung 2.5 m inside after it, once or twice a race; once into a
+# car, off the line and down onto the apron (2026-10-30 20:26, 20:35)
+OFF_WALL_FADE = float(env('OFF_WALL_FADE', '0'))
 # heading inside there, or for OFF_WALL_TAIL metres after: steer right to stop the turn (0: never).
 # With KD 0.3 the stick went from left to 0 at the end of the zone while the car pointed 3.5
 # degrees inside, and it ran on to 4.1 m inside the wall, back to it at 5 degrees (2026-10-30 15:33)
@@ -294,6 +299,16 @@ class Pilot:
                 return True
         return False
 
+    def to_zone_end(self):
+        """Metres from the car to the end of the OFF_WALL_ZONES zone it is in (None outside them)."""
+        station, length = self.line.hint * driver.SPACING, self.line.track.n * driver.SPACING
+        for a, b in OFF_WALL_ZONES:
+            if a <= b and a <= station <= b:
+                return b - station
+            if a > b and (station >= a or station <= b):
+                return b - station if station <= b else length - station + b
+        return None
+
     def off_wall_now(self, t):
         """In a zone that the car came into while steering: not the one it is in when steering
         starts after the launch. The car is not pressed on the wall there yet, and the left took
@@ -350,6 +365,9 @@ class Pilot:
                         self.off_wall_since = now  # just came in
                     self.off_wall_last = now
                     ramp = min(1.0, (now - self.off_wall_since) / OFF_WALL_RAMP) if OFF_WALL_RAMP > 0 else 1.0
+                    left = self.to_zone_end() if OFF_WALL_FADE > 0 else None
+                    if left is not None:
+                        ramp = min(ramp, left / OFF_WALL_FADE)
                     u = OFF_WALL_KD * (self.line.d + OFF_WALL_GAP) + OFF_WALL_KPSI * self.line.psi + OFF_WALL_HOLD
                     self.pad.stick(-(STEER_DEADZONE + ramp * (min(OFF_WALL_MAX, STEER_DEADZONE + u) - STEER_DEADZONE))
                                    if u > 0 else 0.0)
