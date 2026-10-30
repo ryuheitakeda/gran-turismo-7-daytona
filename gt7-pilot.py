@@ -82,6 +82,10 @@ OFF_WALL_MAX = float(env('OFF_WALL_MAX', '0.2'))  # the most stick
 # degrees inside, and it ran on to 4.1 m inside the wall, back to it at 5 degrees (2026-10-30 15:33)
 OFF_WALL_COUNTER = float(env('OFF_WALL_COUNTER', '0'))  # stick per radian of heading inside
 OFF_WALL_TAIL = float(env('OFF_WALL_TAIL', '150'))
+# and raise the stick over OFF_WALL_RAMP seconds on coming into a zone (or starting to steer in
+# one). The swing above came on the first one after the launch, where the car was on the line
+# but not pressed on the wall: the full left at once took it 1 m inside in 40 m (MONITOR)
+OFF_WALL_RAMP = float(env('OFF_WALL_RAMP', '0.75'))
 STEER_DEADZONE = float(env('STEER_DEADZONE', '0.13'))  # stick that does nothing (0.136 measured 2026-10-29)
 WALL_FILE = os.path.join(env('XDG_CACHE_HOME', os.path.expanduser('~/.cache')), 'gt7-daytona.wall')  # touch it: ride the wall again
 MENU_TRACE = env('MENU_TRACE', '') == '1'  # log every press on the screens after the race
@@ -147,6 +151,7 @@ class Pilot:
         self.override_until, self.nitro_on, self.r2_on, self.off_line = 0.0, False, False, False
         self.r2_level, self.moving_since, self.launching = 0.0, None, False
         self.launch_throttle, self.launch_fails, self.wall_file = LAUNCH_THROTTLE, 0, False
+        self.off_wall_since = self.off_wall_last = 0.0
         self.rx = telemetry.Receiver(PLAYSTATION_IP, TELEMETRY_FILE, TELEMETRY_RECORD, self.on_packet)
         threading.Thread(target=self.rx.run, args=(lambda: self.running,), daemon=True).start()
         threading.Thread(target=self.drive, daemon=True).start()
@@ -281,8 +286,14 @@ class Pilot:
                 elif self.off_wall(t):
                     # left only, the dead zone added: nearer the wall than OFF_WALL_GAP or heading
                     # at it; inside that, straight on, and the curve brings the car back out
+                    now = time.time()
+                    if now - self.off_wall_last > 0.2:
+                        self.off_wall_since = now  # just came in
+                    self.off_wall_last = now
+                    ramp = min(1.0, (now - self.off_wall_since) / OFF_WALL_RAMP) if OFF_WALL_RAMP > 0 else 1.0
                     u = OFF_WALL_KD * (self.line.d + OFF_WALL_GAP) + OFF_WALL_KPSI * self.line.psi
-                    self.pad.stick(-min(OFF_WALL_MAX, STEER_DEADZONE + u) if u > 0 else 0.0)
+                    self.pad.stick(-(STEER_DEADZONE + ramp * (min(OFF_WALL_MAX, STEER_DEADZONE + u) - STEER_DEADZONE))
+                                   if u > 0 else 0.0)
                 else:
                     self.pad.stick(stick)
         if NITRO == 'straights' and self.line:
