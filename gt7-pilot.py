@@ -370,6 +370,18 @@ class Pilot:
         else:
             self.pad.press(button, DPAD_LENGTH if button in pad.DPAD else KEYPRESS_LENGTH)
 
+    def last_balance(self):
+        """The balance after the last race in RACES_FILE when that race ended at most half an
+        hour ago: a restart between races leaves it as it was, while the top bar's small
+        digits get misread now and then, alike twice in a row ('1' as '4' on 2026-10-30 14:28)."""
+        try:
+            record = next((r for r in reversed(races.load()) if r.get('balance')), None)
+            if record and time.time() - datetime.datetime.fromisoformat(record['time']).timestamp() <= 1800:
+                return record['balance']
+        except (OSError, ValueError, TypeError):
+            pass
+        return None
+
     def top_credits(self, window):
         """The credits in the start screen's top bar, when two reads a second apart agree."""
         values = []
@@ -565,7 +577,7 @@ class Pilot:
                     # the credits before the race, to tell the reward from the balance after it: the
                     # last rewards screen's balance (big digits) or, first, the top bar's (small; read
                     # twice a second apart, since its digits roll for a moment after a race)
-                    self.balance_before = self.balance_after or self.top_credits(window)
+                    self.balance_before = self.balance_after or self.last_balance() or self.top_credits(window)
                     self.press('cross', 'start')
                 elif reached == 'race':
                     log('  The race is already running (restarted, or started by the X that woke the menu)')
