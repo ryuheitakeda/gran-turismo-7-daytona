@@ -4,10 +4,12 @@
 
 This script is the digital equivalent of using a rubber-band on your controller.  It will hold down the gas and steer slightly right during the race and will navigate the menu to restart in between races.
 
+It runs on **Windows** and **Linux** (X11) as one Python script, `gt7_daytona.py`, and controls the PS5 through [Chiaki](https://github.com/streetpea/chiaki-ng) Remote Play.
+
 ## Reasons For
 
-- It's a clear text bash script.
-- It uses only common, open-source linux tools: chiaki and xdotool (plus flock and awk, which every distribution ships).
+- It's one clear text Python script using only the standard library (Python 3.9 or newer).
+- On Windows nothing else is needed but Chiaki; on Linux it also needs xdotool.
 - It can make your grind time more productive and more hands-off.
 - With the setup below, a race takes ~14 minutes and pays 9,705,000 credits (1st place with the clean race bonus), making it easier to stop without losing progress.
 - It is very stable.  It has been recorded to successfully loop over 50 times in a single run before the test was stopped.
@@ -16,7 +18,8 @@ This script is the digital equivalent of using a rubber-band on your controller.
 
 ## Reasons Against
 
-- It requires a linux X11 desktop session, real or virtual (e.g. Chrome Remote Desktop), because xdotool only works with X11 windows.
+- On Windows it sends keys to the Chiaki window, so it brings that window to the front and keeps it there: you can't use the PC for other things while it runs (a second monitor is fine as long as you don't click away).
+- On Linux it requires an X11 desktop session, real or virtual (e.g. Chrome Remote Desktop), because xdotool only works with X11 windows.
 - By design, it's very basic compared to other driving scripts; it can only handle oval tracks.
 - It drives blind: it doesn't look at the screen, so it can't notice when a menu shows up that it doesn't expect.
 - You can make more money using input-recorded driving scripts to complete higher-reward races.
@@ -32,14 +35,16 @@ This script is the digital equivalent of using a rubber-band on your controller.
 
 ## Setup
 
+- Install Python 3.9 or newer (Windows: <https://www.python.org/downloads/>, tick "Add python.exe to PATH"; the `py` launcher also works).
 - Install Chiaki
-  - Install from your favorite software manager or from the terminal with `sudo apt install chiaki`.  Avoid `sudo snap install chiaki`: the snap is an older third-party package (2.1.1, 2021; Ubuntu 24.04's apt has 2.2.0).
+  - Windows: download [chiaki-ng](https://github.com/streetpea/chiaki-ng/releases) (the Windows installer or portable zip).
+  - Linux: install from your favorite software manager or from the terminal with `sudo apt install chiaki`.  Avoid `sudo snap install chiaki`: the snap is an older third-party package (2.1.1, 2021; Ubuntu 24.04's apt has 2.2.0).
   - You **must pair Chiaki with your Playstation** before using the script.
   - Pairing is not hard per-se but it's a multi-step process that's worth using a guide for the first time.
   - Pairing asks for your PSN Account ID (base64).  [psn-account-id.py](https://github.com/streetpea/chiaki-ng/blob/main/scripts/psn-account-id.py) prints it after you log in to PSN in a browser.
-- Install xdotool with `sudo apt install xdotool`.
-- Download the script.  Give it execution permission if needed.
-  - The script doesn't install anything itself; it tells you which commands are missing.
+- Linux only: install xdotool with `sudo apt install xdotool`.
+- Download this repository (the green Code button > Download ZIP, or `git clone`).  You only need `gt7_daytona.py`.
+  - The script doesn't install anything itself; `check` (see Directions) tells you what is missing.
 - Create a custom race at Daytona (make sure to save your settings)
   - Track: Daytona Tri-Oval
   - Race Type: Lap
@@ -77,12 +82,17 @@ This script is the digital equivalent of using a rubber-band on your controller.
 
 ## Configuration
 
-- Every setting can be put in `~/.config/gt7-daytona.conf` (bash syntax) or given as an environment variable of the same name.  The environment wins over the file, and the file wins over the defaults.  For example:
+- Every setting can be put in the config file or given as an environment variable of the same name.  The environment wins over the file, and the file wins over the defaults.  The file is plain `KEY=VALUE` lines (`#` starts a comment):
+  - Windows: `%APPDATA%\gt7-daytona\config.txt` (create the folder and file yourself)
+  - Linux: `~/.config/gt7-daytona.conf`
+  - or any path with `--config <file>` / `CONFIG_FILE`
 
-  ```bash
-  DISPLAY=:20
+  ```
+  PLAYSTATION_IP=192.168.1.20
   RACE_TIME=805
   ```
+
+  `--ip <address>` on the command line sets `PLAYSTATION_IP` for one run.
 
 - `PLAYSTATION_IP` (default empty): your Playstation's IP address.  When set, the script reads GT7's telemetry (see below) to check that the race started, to end the race at the finish line, and to quit when the car gets stuck.
 - `START_TIMEOUT` (default 15), `STUCK_SPEED` (default 30) and `STUCK_TIME` (default 5): with telemetry, quit when the car isn't on track that many seconds after pressing X, or stays below `STUCK_SPEED` km/h for `STUCK_TIME` seconds during the race.
@@ -91,34 +101,40 @@ This script is the digital equivalent of using a rubber-band on your controller.
 - `STRAIGHT_TIME` (default 15): seconds to drive straight after the start before steering towards the wall.
 - `RACE_PRIZE` (default 9705000): only used to total the credits in the log.  If you use a different car or setup, set it to the reward you get.
 - `MAINTENANCE_RACES` (default 20): log a reminder to check the oil and engine every that many races; 0 turns it off.
-- `QUICKPRESS_LENGTH` (default 0.01) and `KEYPRESS_LENGTH` (default 0.08): how long the steering taps and the menu presses last, in seconds.  The window is looked up on every key press, which adds about 0.04 seconds to each tap; the steering is tuned with that included.
-- `WINDOW_NAME` (default `^Chiaki \| Stream$`): the Chiaki stream window title as an xdotool regular expression (case-insensitive).
-- `ANALOG_L__R`, `DPAD_R`, `KEY_R2`, `KEY_X`: keys that MUST match your Chiaki key config.  The defaults are Chiaki's default keys.
-- `LOG_FILE` (default `~/gt7-daytona.log`) and `LOCK_FILE` (default `~/.cache/gt7-daytona.lock`): used by the background commands below.
+- `QUICKPRESS_LENGTH` (default 0.01 on Linux, 0.05 on Windows) and `KEYPRESS_LENGTH` (default 0.08): how long the steering taps and the menu presses last, in seconds.  On Linux the window is looked up on every key press, which adds about 0.04 seconds to each tap, and the steering is tuned with that included.  Windows has no lookup, so its default is longer to match; this is an estimate and has not been measured on a real PC yet. If the car scrapes the wall or drifts away from it, adjust it in steps of 0.01.
+- `WINDOW_NAME` (default `^Chiaki \| Stream$`): the Chiaki stream window title as a regular expression (case-insensitive).
+- `ANALOG_L__R`, `DPAD_R`, `KEY_R2`, `KEY_X`: keys that MUST match your Chiaki key config.  The defaults are Chiaki's default keys, written as X11 key names (`bracketright` is `]`, `Return` is Enter, `Right` is the right arrow).  Letters, digits, arrows, F1-F10 and common punctuation are supported on Windows.
+- `DISPLAY` (Linux only): the X display that shows Chiaki, e.g. `:20`.
+- `LOG_FILE` (default `gt7-daytona.log` in your home folder) and `LOCK_FILE` (default `~/.cache/gt7-daytona.lock`, on Windows `%LOCALAPPDATA%\gt7-daytona\gt7-daytona.lock`): used by the background commands below.
 
 ## Directions
 
 - Start your Playstation and start Gran Turismo 7.
-- Start Chiaki and connect to your Playstation.
+- Start Chiaki and connect to your Playstation.  Leave the stream window open (not minimized).
+- Run `python gt7_daytona.py check` (Windows: `py gt7_daytona.py check`).  It checks the stream window, the key names, and, with `PLAYSTATION_IP` set, the telemetry and firewall, and says how to fix what fails.  It does not press any game key.
+  - If the telemetry check fails because UDP 33740 is already in use, another copy of the script is probably running.
 - With your low PP tune selected, start a custom race at Daytona and load the custom race settings.
 - Enter the race itself.  Switch to your high PP tune.
 - With the arrow on the Start button, start the script.
   - The start screen hides its menu after a while without input, and the first X press only brings it back.  So before the first race the script presses X twice, 2 seconds apart; if the menu was showing, the second press lands on the loading screen.
-  - `./gt7-daytona.sh` runs it in the terminal.  When you're done, exit the script by pressing `CTRL+C`.
-  - `./gt7-daytona.sh start` runs it in the background and writes the log to `~/gt7-daytona.log`.  Use `./gt7-daytona.sh status`, `./gt7-daytona.sh log` and `./gt7-daytona.sh stop` to check on it and stop it.
-  - From an SSH session, set `DISPLAY` to the desktop that shows Chiaki (e.g. `DISPLAY=:20` in the config file).
+  - `python gt7_daytona.py` (or `run`) runs it in the terminal and waits for Enter first, so you can check the cursor.  `--yes` skips the wait.  When you're done, exit the script by pressing `CTRL+C`.
+  - `python gt7_daytona.py start` runs it in the background and writes the log to `LOG_FILE`.  Use `status`, `log [lines]` and `stop` to check on it and stop it.
+  - Linux from an SSH session: set `DISPLAY` to the desktop that shows Chiaki (e.g. `DISPLAY=:20` in the config file).
 - Only one copy of the script can run at a time.
-- The script releases every key it holds when it quits, whether by `CTRL+C`, `stop`, `kill` or an error.  Only `kill -9` can leave R2 held down in Chiaki; release it with `xdotool search --name '^Chiaki \| Stream$' keyup 4`.
+- On Windows the PC must not go to sleep: the script asks Windows to stay awake while it runs.  Turn off the screen saver lock and keep the Chiaki window visible.
+- The script releases every key it holds when it quits, whether by `CTRL+C`, `stop`, `kill` or an error.  Only a hard kill (`kill -9`, Task Manager) can leave R2 held down in Chiaki; press and release the R2 key yourself, or restart the stream.
 - If the Chiaki stream window disappears (e.g. the stream disconnects), the script logs an error and quits.
 
 ## Telemetry
 
-- GT7 sends live telemetry (lap, speed, position, whether the car is on track) to a computer that sends it heartbeats over UDP.  `gt7-telemetry.py` receives it with nothing but python3; GT7 needs no setting for it.
-- Let the telemetry through the computer's firewall, e.g. `sudo ufw allow from <playstation-ip> to any port 33740 proto udp`.
+- GT7 sends live telemetry (lap, speed, position, whether the car is on track) to a computer that sends it heartbeats over UDP.  The script receives it itself; GT7 needs no setting for it.
+- Let the telemetry through the computer's firewall.
+  - Windows: allow Python when Windows Defender asks the first time (private networks), or run once in an administrator prompt: `netsh advfirewall firewall add rule name="GT7 telemetry" dir=in action=allow protocol=UDP localport=33740`.
+  - Linux, e.g.: `sudo ufw allow from <playstation-ip> to any port 33740 proto udp`.
 - Set `PLAYSTATION_IP` in the config file.  The log says "Telemetry from ..." at start, and "Race ending (P1, best lap 1:16.856)" when the car crosses the finish line.
 - Without telemetry the script times the race with `RACE_TIME` as before.
 
-## Running without a monitor (Chrome Remote Desktop)
+## Running without a monitor (Linux, Chrome Remote Desktop)
 
 - Install a light desktop and Chrome Remote Desktop: `sudo apt install --no-install-recommends xfce4 xfce4-terminal dbus-x11` and the `.deb` from <https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb>.
 - `echo 'exec /etc/X11/Xsession /usr/bin/xfce4-session' > ~/.chrome-remote-desktop-session`
@@ -135,7 +151,7 @@ This script is the digital equivalent of using a rubber-band on your controller.
 
 ## Changelog
 
-- Initial Release
+- Initial Release (bash + xdotool)
 - Updated for xdotool 3.2 and re-timed for GT7 Update 1.63
 - Fork changes:
   - Hold R2 only from 2 seconds after pressing X and release it before the menus
@@ -147,6 +163,8 @@ This script is the digital equivalent of using a rubber-band on your controller.
   - `start`, `stop`, `status` and `log` commands, a lock against running twice, times in the log, a maintenance reminder
   - Settings from a config file or environment variables
   - Check for missing commands and `DISPLAY` instead of installing packages; `bc` and `wmctrl` are no longer needed
+  - Rewritten as one Python script (`gt7_daytona.py`) that runs on Windows (SendInput to the Chiaki window) and Linux (xdotool); the telemetry receiver is built in; `gt7-daytona.sh` and `gt7-telemetry.py` are gone
+  - `check` command, `--ip`, `--yes` and `--config` options, a stop-flag based `stop` that works on Windows, keeps Windows awake
 
 ## License & Thanks
 
