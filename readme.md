@@ -136,6 +136,7 @@ It runs on **Windows** and **Linux** (X11) as one Python script, `gt7_daytona.py
 - With telemetry it also records the run for later reading (`LAP_LOG`, default `~/gt7-laps.jsonl`, `off` to disable):
   - `gt7-laps.jsonl`: one line per finished lap, `{"kind":"lap","ts","race","lap","lap_ms","best_ms","pos","vmax","vmin"}` (speeds in km/h).
   - `gt7-events.jsonl` (next to it): one line when the script quits on an error (`start`, `stuck`, `no finish`) with the last ~10 s as `tail` rows `[time, lap, km/h, x, z]`.
+  - `tools/gt7_sections.py [--step N] [--race N] FRAMES... --out gt7-sections.jsonl` reads the section-time table (D-pad right twice during a race) from screenshots with Pillow and `tesseract`, one line per lap: `{"kind":"sections","frame","race","race","sections_ms":[s1,s2,s3],"lap_ms"}`.  A row is kept only when the three sections add up to LAST exactly.  About 0.2 s per frame, so use `--step 4` on 1 s recordings (the full table is on screen for only ~25 s after each lap).
   - [docs/opencode-monitor.md](docs/opencode-monitor.md) is a read-only prompt for letting an LLM watch these files while the script runs.
 
 ## Running without a monitor (Linux, Chrome Remote Desktop)
