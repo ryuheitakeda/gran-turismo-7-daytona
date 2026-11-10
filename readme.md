@@ -133,6 +133,10 @@ It runs on **Windows** and **Linux** (X11) as one Python script, `gt7_daytona.py
   - Linux, e.g.: `sudo ufw allow from <playstation-ip> to any port 33740 proto udp`.
 - Set `PLAYSTATION_IP` in the config file.  The log says "Telemetry from ..." at start, and "Race ending (P1, best lap 1:16.856)" when the car crosses the finish line.
 - Without telemetry the script times the race with `RACE_TIME` as before.
+- With telemetry it also records the run for later reading (`LAP_LOG`, default `~/gt7-laps.jsonl`, `off` to disable):
+  - `gt7-laps.jsonl`: one line per finished lap, `{"kind":"lap","ts","race","lap","lap_ms","best_ms","pos","vmax","vmin"}` (speeds in km/h).
+  - `gt7-events.jsonl` (next to it): one line when the script quits on an error (`start`, `stuck`, `no finish`) with the last ~10 s as `tail` rows `[time, lap, km/h, x, z]`.
+  - [docs/opencode-monitor.md](docs/opencode-monitor.md) is a read-only prompt for letting an LLM watch these files while the script runs.
 
 ## Running without a monitor (Linux, Chrome Remote Desktop)
 
@@ -164,6 +168,7 @@ It runs on **Windows** and **Linux** (X11) as one Python script, `gt7_daytona.py
   - Settings from a config file or environment variables
   - Check for missing commands and `DISPLAY` instead of installing packages; `bc` and `wmctrl` are no longer needed
   - Rewritten as one Python script (`gt7_daytona.py`) that runs on Windows (SendInput to the Chiaki window) and Linux (xdotool); the telemetry receiver is built in; `gt7-daytona.sh` and `gt7-telemetry.py` are gone
+  - Record every lap and the last seconds before an error as JSON lines (`LAP_LOG`), with a monitor prompt in `docs/opencode-monitor.md`
   - `check` command, `--ip`, `--yes` and `--config` options, a stop-flag based `stop` that works on Windows, keeps Windows awake
 
 ## License & Thanks

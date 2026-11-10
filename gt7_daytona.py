@@ -15,7 +15,9 @@
 # Linux:   sends keys with xdotool (X11).
 
 import argparse
+import collections
 import ctypes
+import json
 import os
 import re
 import signal
@@ -79,6 +81,7 @@ def parse_config(path):
 
 DEFAULTS = {
     'KEYPRESS_LENGTH': '0.08',
+    'LAP_LOG': os.path.join(os.path.expanduser('~'), 'gt7-laps.jsonl'),  # one JSON line per lap, 'off' to disable
     'LAP_MILES': '2.6',
     'LAPS': '10',
     'LOCK_FILE': os.path.join(default_cache_dir(), 'gt7-daytona.lock'),
@@ -124,11 +127,16 @@ class Config:
         for key in ('LAPS', 'MAINTENANCE_RACES', 'RACE_PRIZE', 'RACE_TIME', 'START_TIMEOUT',
                     'STUCK_SPEED', 'STUCK_TIME', 'STRAIGHT_TIME'):
             setattr(self, key, int(float(cfg[key])))
-        for key in ('LOCK_FILE', 'LOG_FILE', 'PLAYSTATION_IP', 'WINDOW_NAME', 'ANALOG_L__R',
+        for key in ('LAP_LOG', 'LOCK_FILE', 'LOG_FILE', 'PLAYSTATION_IP', 'WINDOW_NAME', 'ANALOG_L__R',
                     'DPAD_R', 'KEY_R2', 'KEY_X', 'DISPLAY'):
             setattr(self, key, cfg[key])
         self.LOCK_FILE = os.path.expanduser(self.LOCK_FILE)
         self.LOG_FILE = os.path.expanduser(self.LOG_FILE)
+        self.LAP_LOG = os.path.expanduser(self.LAP_LOG)
+        if self.LAP_LOG.lower() == 'off':
+            self.LAP_LOG = self.EVENT_LOG = ''
+        else:  # gt7-laps.jsonl -> gt7-events.jsonl next to it
+            self.EVENT_LOG = os.path.join(os.path.dirname(self.LAP_LOG), 'gt7-events.jsonl')
         self.PID_FILE = self.LOCK_FILE + '.pid'
         self.STOP_FILE = self.LOCK_FILE + '.stop'
 
@@ -410,7 +418,8 @@ def decrypt(data):
 
 
 class State:
-    __slots__ = ('time', 'on_track', 'paused', 'loading', 'lap', 'laps', 'speed', 'position', 'best', 'last')
+    __slots__ = ('time', 'on_track', 'paused', 'loading', 'lap', 'laps', 'speed', 'position', 'best', 'last',
+                 'x', 'z')
 
 
 def parse_state(p, now=None):
@@ -420,6 +429,7 @@ def parse_state(p, now=None):
     s.best, s.last = struct.unpack_from('<ii', p, 0x78)
     s.position = struct.unpack_from('<h', p, 0x84)[0]
     s.speed = int(struct.unpack_from('<f', p, 0x4C)[0] * 3.6)
+    s.x, s.z = struct.unpack_from('<f', p, 0x04)[0], struct.unpack_from('<f', p, 0x0C)[0]
     s.on_track = flags & 1
     s.paused = flags >> 1 & 1
     s.loading = flags >> 2 & 1
@@ -427,12 +437,65 @@ def parse_state(p, now=None):
     return s
 
 
+class Recorder:
+    """Appends one JSON line per finished lap (LAP_LOG) and, on an error, the last
+    ~10 s of states (EVENT_LOG), so a person or an LLM can read the run afterwards."""
+
+    def __init__(self, lap_log, event_log):
+        self.lap_log = lap_log
+        self.event_log = event_log
+        self.race = 0
+        self.ring = collections.deque(maxlen=50)  # states arrive every 0.2 s
+        self.lock = threading.Lock()
+        self.begin(0)
+
+    def begin(self, race):
+        with self.lock:
+            self.race = race
+            self.prev_lap = 0
+            self.vmax = 0
+            self.vmin = None
+            self.ring.clear()
+
+    def write(self, path, row):
+        if not path:
+            return
+        try:
+            with open(path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(row, separators=(',', ':')) + '\n')
+        except OSError:
+            pass  # recording must never stop the farm
+
+    def feed(self, s):
+        if not s.on_track or s.paused or s.loading:
+            return
+        with self.lock:
+            self.ring.append((round(s.time, 1), s.lap, s.speed, round(s.x), round(s.z)))
+            if s.lap > self.prev_lap >= 1:
+                self.write(self.lap_log, {
+                    'kind': 'lap', 'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'race': self.race,
+                    'lap': self.prev_lap, 'lap_ms': s.last, 'best_ms': s.best, 'pos': s.position,
+                    'vmax': self.vmax, 'vmin': self.vmin})
+                self.vmax, self.vmin = 0, None
+            self.prev_lap = s.lap if s.lap >= 1 else 0
+            if s.lap >= 1:
+                self.vmax = max(self.vmax, s.speed)
+                self.vmin = s.speed if self.vmin is None else min(self.vmin, s.speed)
+
+    def event(self, reason):
+        with self.lock:
+            self.write(self.event_log, {
+                'kind': 'event', 'ts': time.strftime('%Y-%m-%dT%H:%M:%S'), 'race': self.race,
+                'reason': reason, 'tail': [list(r) for r in self.ring]})  # time, lap, km/h, x, z
+
+
 class Telemetry:
     """Receives GT7 telemetry in a thread. GT7 only sends to a host that keeps
     sending it heartbeats. The host firewall must allow UDP port 33740 in."""
 
-    def __init__(self, host):
+    def __init__(self, host, recorder=None):
         self.host = host
+        self.recorder = recorder
         self.state = None
         self.stop = False
         self.error = None
@@ -470,6 +533,11 @@ class Telemetry:
             if packet is None:
                 continue
             self.state = parse_state(packet)
+            if self.recorder:
+                try:
+                    self.recorder.feed(self.state)
+                except Exception:
+                    pass
             last_parse = now
 
     def latest(self):
@@ -643,6 +711,8 @@ def race_loop(cfg, keys, tel):
     while True:
         race_count += 1
         log('Race %d' % race_count)
+        if tel and tel.recorder:
+            tel.recorder.begin(race_count)
         if race_count == 1:
             # the start screen hides its menu after a while without input, and the
             # first X only brings it back; if the menu was showing, this X starts the
@@ -658,6 +728,8 @@ def race_loop(cfg, keys, tel):
         while tel and tel.latest() and tel.latest().on_track == 0:
             if clock() >= start_deadline:
                 log('ERROR: the race did not start (telemetry: the car is not on track)')
+                if tel.recorder:
+                    tel.recorder.event('start')
                 raise Quit(1)
             pause(0.5)
 
@@ -681,11 +753,15 @@ def race_loop(cfg, keys, tel):
                     slow_since = slow_since if slow_since is not None else clock()
                     if clock() - slow_since >= cfg.STUCK_TIME:
                         log('ERROR: the car is stuck (lap %d, %d km/h for %ds)' % (t.lap, t.speed, cfg.STUCK_TIME))
+                        if tel.recorder:
+                            tel.recorder.event('stuck')
                         raise Quit(1)
                 else:
                     slow_since = None
                 if clock() >= race_end + 120:
                     log('ERROR: no finish after %ds (lap %d of %d)' % (cfg.RACE_TIME + 120, t.lap, t.laps))
+                    if tel.recorder:
+                        tel.recorder.event('no finish')
                     raise Quit(1)
             elif clock() >= race_end:
                 break
@@ -776,7 +852,8 @@ def cmd_run(cfg, keys, assume_yes):
         log('Started: RACE_TIME=%d STRAIGHT_TIME=%d RACE_PRIZE=%d window=%s' % (
             cfg.RACE_TIME, cfg.STRAIGHT_TIME, cfg.RACE_PRIZE, window))
         if cfg.PLAYSTATION_IP:
-            tel = Telemetry(cfg.PLAYSTATION_IP)
+            rec = Recorder(cfg.LAP_LOG, cfg.EVENT_LOG) if cfg.LAP_LOG else None
+            tel = Telemetry(cfg.PLAYSTATION_IP, rec)
             for _ in range(10):
                 if tel.latest():
                     break

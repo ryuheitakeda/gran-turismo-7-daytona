@@ -1,3 +1,4 @@
+import json
 import os
 import struct
 import sys
@@ -49,6 +50,44 @@ class TelemetryTest(unittest.TestCase):
         s = g.parse_state(g.decrypt(bytes(enc)))
         self.assertEqual((s.lap, s.laps, s.position, s.best, s.on_track, s.speed), (3, 10, 1, 76856, 1, 360))
         self.assertEqual(g.lap_time(76856), '1:16.856')
+
+
+class RecorderTest(unittest.TestCase):
+    def state(self, lap, speed=200, last=-1, t=0.0, on_track=1):
+        s = g.State()
+        s.lap, s.laps, s.speed, s.last, s.best = lap, 10, speed, last, last
+        s.position, s.x, s.z, s.time = 1, 10.4, -3.6, t
+        s.on_track, s.paused, s.loading = on_track, 0, 0
+        return s
+
+    def test_lap_rows_and_event(self):
+        with tempfile.TemporaryDirectory() as d:
+            laps, events = os.path.join(d, 'l.jsonl'), os.path.join(d, 'e.jsonl')
+            r = g.Recorder(laps, events)
+            r.begin(3)
+            r.feed(self.state(0, 50))
+            r.feed(self.state(1, 280))
+            r.feed(self.state(1, 240))
+            r.feed(self.state(2, 250, last=76856))
+            r.event('stuck')
+            rows = [json.loads(x) for x in open(laps)]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual((rows[0]['race'], rows[0]['lap'], rows[0]['lap_ms']), (3, 1, 76856))
+            self.assertEqual((rows[0]['vmax'], rows[0]['vmin']), (280, 240))
+            ev = json.loads(open(events).read())
+            self.assertEqual((ev['reason'], len(ev['tail'])), ('stuck', 4))
+
+    def test_off_track_ignored_and_new_race_resets(self):
+        with tempfile.TemporaryDirectory() as d:
+            laps = os.path.join(d, 'l.jsonl')
+            r = g.Recorder(laps, '')
+            r.begin(1)
+            r.feed(self.state(1))
+            r.feed(self.state(2, on_track=0))  # not on track: no row
+            r.begin(2)
+            r.feed(self.state(2))  # first state of the new race, no row
+            self.assertFalse(os.path.exists(laps))
+            r.event('x')  # no event file configured: must not raise
 
 
 if __name__ == '__main__':
