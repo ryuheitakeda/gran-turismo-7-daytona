@@ -5,7 +5,7 @@ from screenshots and write one JSON line per lap.
 usage: gt7_sections.py [--out FILE] [--step N] [--race N] FRAME_DIR_OR_PNG...
 needs: Pillow and the `tesseract` command. Frames are Chiaki screenshots (any size, 16:9).
 The three section times are checked against LAST (their sum must match exactly);
-rows that fail are skipped, so a misread number never reaches the output.
+rows that fail are skipped (a lap read twice a few ms apart counts once), so a misread number never reaches the output.
 """
 import argparse
 import glob
@@ -79,7 +79,7 @@ def run(paths, out, step=1, race=None):
     n = 0
     for f in frames(paths, step, race):
         parsed = parse_table(ocr(f))
-        if not parsed or parsed[1] == seen:
+        if not parsed or (seen is not None and abs(parsed[1] - seen) <= 5):
             continue  # unreadable, or the same lap as the last row
         sections, last = parsed
         seen = last
